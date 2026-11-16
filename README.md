@@ -19,6 +19,8 @@ npm start
 
 Spielen: Seite öffnen → Name + Marine wählen → **Raum erstellen & Link teilen** → Link an Freund schicken.
 
+Spielmodi: **Klassisch** oder **Mit Power-ups** (EMP, Artilleriebeschuss, Nuke, Radar – je Spieler eines, einmal einsetzbar).
+
 Hinweis Free-Plan: Nach ca. 15 Minuten ohne Besucher schläft der Server ein; der erste Aufruf dauert dann etwa 30–60 Sekunden.
 
 ## Regeln (klassisch, wie das Hasbro-Brettspiel)

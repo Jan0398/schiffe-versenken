@@ -41,6 +41,15 @@
 
     <div class="fleet-preview" id="fleetPreview"></div>
 
+    <div class="field">
+      <span>Spielmodus</span>
+      <div class="seg big-seg" id="segMode">
+        <button data-v="classic">⚓ Klassisch</button>
+        <button data-v="power">⚡ Mit Power-ups</button>
+      </div>
+      <p class="hint" id="modeHint"></p>
+    </div>
+
     <div id="joinInvite" class="invite hidden">
       <div>Du wurdest eingeladen! Raum <b id="inviteCode"></b></div>
       <button class="btn primary big" id="btnAcceptInvite">⚓ Beitreten</button>
@@ -67,7 +76,6 @@
       </div>
     </div>
 
-    <p class="hint rule-hint">Regel: Wer trifft, darf nochmal schießen. Bei Wasser ist der Gegner dran.</p>
   </div>
 </section>
 
@@ -83,6 +91,7 @@
     </div>
     <button class="btn primary hidden" id="btnShare">📤 Link teilen</button>
     <div class="sonar"><div></div><div></div><div></div></div>
+    <p class="muted" id="lobbyMode"></p>
     <p class="muted">Warte auf Gegner …</p>
     <button class="btn ghost" id="btnLobbyCancel">Abbrechen</button>
   </div>
@@ -106,6 +115,7 @@
         <button class="btn ghost" id="btnClear">Leeren</button>
       </div>
       <p class="hint">Schiff wählen, dann aufs Feld klicken. Gesetzte Schiffe anklicken, um sie wieder aufzunehmen. Rechtsklick dreht.</p>
+      <div class="power-pick hidden" id="powerPick"></div>
       <button class="btn primary big" id="btnReady" disabled>Bereit zur Schlacht</button>
       <div class="wait-msg hidden" id="waitMsg"><div class="spinner"></div><span></span></div>
     </div>
@@ -115,6 +125,7 @@
 <!-- SCHLACHT -->
 <section class="screen hidden" id="scrBattle">
   <div class="status" id="status"></div>
+  <div class="powerbar hidden" id="powerBar"></div>
   <div class="battle">
     <div class="side" id="sideMe">
       <div class="plate" id="plateMe"></div>
