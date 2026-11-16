@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Schiffe versenken</title>
+<meta name="theme-color" content="#06121d">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='44' fill='%230b3b5c' stroke='%233fd0ff' stroke-width='6'/><circle cx='50' cy='50' r='10' fill='%23ff4b3a'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Black+Ops+One&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="bg"></div>
+
+<header class="topbar">
+  <div class="brand" id="brandHome"><span class="brand-dot"></span>SCHIFFE VERSENKEN</div>
+  <div class="topbar-right">
+    <button class="icon-btn" id="btnSound" title="Ton an/aus">🔊</button>
+  </div>
+</header>
+
+<!-- MENÜ -->
+<section class="screen" id="scrMenu">
+  <div class="menu-hero">
+    <h1>SCHIFFE<br><span>VERSENKEN</span></h1>
+    <p class="sub">Der Seekriegs-Klassiker · 1 gegen 1 online oder gegen den Computer</p>
+  </div>
+
+  <div class="panel menu-panel">
+    <label class="field">
+      <span>Dein Name</span>
+      <input id="inName" maxlength="18" placeholder="z. B. Kapitän Jan" autocomplete="nickname">
+    </label>
+
+    <div class="field">
+      <span>Wähle deine Marine</span>
+      <div class="countries" id="countries"></div>
+    </div>
+
+    <div class="fleet-preview" id="fleetPreview"></div>
+
+    <div id="joinInvite" class="invite hidden">
+      <div>Du wurdest eingeladen! Raum <b id="inviteCode"></b></div>
+      <button class="btn primary big" id="btnAcceptInvite">⚓ Beitreten</button>
+    </div>
+
+    <div class="modes">
+      <div class="mode-card">
+        <h3>🤖 Gegen Computer</h3>
+        <div class="seg" id="segDiff">
+          <button data-v="easy">Leicht</button>
+          <button data-v="normal" class="on">Normal</button>
+          <button data-v="hard">Schwer</button>
+        </div>
+        <button class="btn primary" id="btnCpu">Spiel starten</button>
+      </div>
+      <div class="mode-card">
+        <h3>🌐 Online 1 gegen 1</h3>
+        <button class="btn primary" id="btnHost">Raum erstellen &amp; Link teilen</button>
+        <div class="join-row">
+          <input id="inCode" maxlength="5" placeholder="CODE" autocomplete="off">
+          <button class="btn" id="btnJoin">Beitreten</button>
+        </div>
+        <div class="hint" id="onlineHint"></div>
+      </div>
+    </div>
+
+    <label class="check">
+      <input type="checkbox" id="chkBonus">
+      <span>Bei Treffer darf man nochmal schießen <small>(sonst klassisch: abwechselnd)</small></span>
+    </label>
+  </div>
+</section>
+
+<!-- LOBBY -->
+<section class="screen hidden" id="scrLobby">
+  <div class="panel lobby">
+    <h2>Raum erstellt</h2>
+    <div class="code-big" id="lobbyCode">-----</div>
+    <p>Schick diesen Link an deinen Freund:</p>
+    <div class="link-row">
+      <input id="lobbyLink" readonly>
+      <button class="btn" id="btnCopy">Kopieren</button>
+    </div>
+    <button class="btn primary hidden" id="btnShare">📤 Link teilen</button>
+    <div class="sonar"><div></div><div></div><div></div></div>
+    <p class="muted">Warte auf Gegner …</p>
+    <button class="btn ghost" id="btnLobbyCancel">Abbrechen</button>
+  </div>
+</section>
+
+<!-- AUFSTELLUNG -->
+<section class="screen hidden" id="scrPlace">
+  <div class="place-head">
+    <h2>Flotte aufstellen</h2>
+    <div class="vs" id="placeVs"></div>
+  </div>
+  <div class="place-layout">
+    <div class="board-col">
+      <div id="placeBoard"></div>
+    </div>
+    <div class="panel dock-panel">
+      <div class="dock" id="dock"></div>
+      <div class="place-tools">
+        <button class="btn" id="btnRotate">↻ Drehen <small>(R)</small></button>
+        <button class="btn" id="btnRandom">🎲 Zufällig</button>
+        <button class="btn ghost" id="btnClear">Leeren</button>
+      </div>
+      <p class="hint">Schiff wählen, dann aufs Feld klicken. Gesetzte Schiffe anklicken, um sie wieder aufzunehmen. Rechtsklick dreht.</p>
+      <button class="btn primary big" id="btnReady" disabled>Bereit zur Schlacht</button>
+      <div class="wait-msg hidden" id="waitMsg"><div class="spinner"></div><span></span></div>
+    </div>
+  </div>
+</section>
+
+<!-- SCHLACHT -->
+<section class="screen hidden" id="scrBattle">
+  <div class="status" id="status"></div>
+  <div class="battle">
+    <div class="side" id="sideMe">
+      <div class="plate" id="plateMe"></div>
+      <div id="myBoard"></div>
+      <div class="fleet-list" id="myFleet"></div>
+    </div>
+    <div class="side" id="sideEnemy">
+      <div class="plate" id="plateEnemy"></div>
+      <div id="enemyBoard"></div>
+      <div class="fleet-list" id="enemyFleet"></div>
+    </div>
+  </div>
+  <div class="log-wrap panel">
+    <div class="log" id="log"></div>
+    <button class="btn ghost small" id="btnSurrender">Aufgeben</button>
+  </div>
+</section>
+
+<!-- MODAL -->
+<div class="modal hidden" id="modal">
+  <div class="modal-box" id="modalBox"></div>
+</div>
+<div class="toast hidden" id="toast"></div>
+
+<script src="ships.js"></script>
+<script src="socket.io/socket.io.js" onerror="window.__noSocket=true"></script>
+<script src="game.js"></script>
+</body>
+</html>

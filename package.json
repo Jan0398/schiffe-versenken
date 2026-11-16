@@ -1,0 +1,17 @@
+{
+  "name": "schiffe-versenken",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Schiffe versenken – online 1 gegen 1 oder gegen den Computer",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
+  }
+}
