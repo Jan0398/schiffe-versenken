@@ -106,7 +106,7 @@ io.on('connection', socket => {
     if (typeof cb !== 'function') return;
     const p = newPlayer(socket, data && data.name, data && data.country);
     const code = newCode();
-    const room = { code, players: [p], phase: 'lobby', turn: null, winner: null, bonusShot: !!(data && data.bonusShot), created: Date.now() };
+    const room = { code, players: [p], phase: 'lobby', turn: null, winner: null, bonusShot: true, created: Date.now() };
     rooms.set(code, room);
     socket.data = { code, pid: p.pid };
     cb({ ok: true, code, pid: p.pid });

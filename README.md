@@ -23,6 +23,6 @@ Hinweis Free-Plan: Nach ca. 15 Minuten ohne Besucher schläft der Server ein; de
 
 ## Regeln (klassisch, wie das Hasbro-Brettspiel)
 - Feld 10×10 (A–J / 1–10), Flotte 5 · 4 · 3 · 3 · 2 Felder, Schiffe dürfen sich berühren.
-- Abwechselnd ein Schuss. Optional: „Bei Treffer nochmal schießen“ (beim Online-Spiel gilt die Einstellung des Raum-Erstellers).
+- Wer trifft, darf nochmal schießen; bei Wasser ist der Gegner dran.
 - Versenkte Schiffe werden angesagt und aufgedeckt.
 - Verbindung weg / Seite neu geladen? Einfach im selben Tab neu laden – das Spiel wird wiederhergestellt (bis zu 2 Minuten).

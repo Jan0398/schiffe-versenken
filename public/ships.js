@@ -355,7 +355,7 @@
     const S = C.ships[key];
     const W = LEN[key] * 100;
     const u = 'sv' + (++uid);
-    const fy = { carrier: 1.12, lhd: 1.15, sub: 2.0, battleship: 1.55, supply: 1.55 }[S.kind] || 1.75;
+    const fy = { carrier: 1.17, lhd: 1.33, sub: 3.5, battleship: 1.8, supply: 1.8 }[S.kind] || 2.3;
     const body = `<g transform="translate(0 50) scale(1 ${fy}) translate(0 -50)">${KINDS[S.kind](W, C, S.opts || {}, u, cc)}</g>`;
     const vb = horiz ? `0 0 ${W} 100` : `0 0 100 ${W}`;
     const g = horiz ? body : `<g transform="translate(100 0) rotate(90)">${body}</g>`;

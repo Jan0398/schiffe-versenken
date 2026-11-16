@@ -21,7 +21,7 @@
 
   const S = {
     name: store.get('sv_name', ''), country: store.get('sv_country', 'de'), diff: store.get('sv_diff', 'normal'),
-    bonus: store.get('sv_bonus') === '1', mode: null, opp: null, code: null, pid: null,
+    bonus: true, mode: null, opp: null, code: null, pid: null,
     oppOnline: true, oppReady: false, screen: 'scrMenu',
   };
   if (!COUNTRIES[S.country]) S.country = 'de';
@@ -110,8 +110,6 @@
     b.onclick = () => { S.diff = b.dataset.v; store.set('sv_diff', S.diff); $$('#segDiff button').forEach(x => x.classList.toggle('on', x === b)); Sound.click(); };
   });
   function $$(sel) { return [...document.querySelectorAll(sel)]; }
-  $('chkBonus').checked = S.bonus;
-  $('chkBonus').onchange = e => { S.bonus = e.target.checked; store.set('sv_bonus', S.bonus ? '1' : '0'); };
   $('brandHome').onclick = () => { if (S.screen === 'scrMenu') return; confirmLeave(); };
 
   const DIFF_LABEL = { easy: 'Leicht', normal: 'Normal', hard: 'Schwer' };
@@ -137,9 +135,10 @@
     }
     if (enemy) board.appendChild(el('div', 'radar'));
     board.append(ships, pegs, cellsL);
-    host.append(el('div'), top, left, board);
+    const fx = el('div', 'fx-over');
+    host.append(el('div'), top, left, board, fx);
     const at = e => { const ce = e.target.closest('.cell'); return ce ? [+ce.dataset.r, +ce.dataset.c] : null; };
-    return { host, board, ships, cellsL, cells, at, cell: (r, c) => cells[r * N + c], peg: (r, c) => pegArr[r * N + c] };
+    return { host, board, fx, ships, cellsL, cells, at, cell: (r, c) => cells[r * N + c], peg: (r, c) => pegArr[r * N + c] };
   }
   function shipEl(cc, key, r, c, h, extra = '') {
     const len = LEN[key], d = el('div', 'ship ' + extra);
@@ -321,16 +320,18 @@
     $('enemyFleet').innerHTML = list(S.opp.country, k => B.enemySunk.some(s => s.key === k));
   }
 
-  function setTurn(mine) {
+  function setTurn(mine, again = false) {
     B.myTurn = mine; B.busy = false;
     enBd.host.classList.toggle('locked', !mine || B.over);
     $('sideMe').style.opacity = mine ? .78 : 1;
     $('sideEnemy').style.opacity = mine ? 1 : .78;
     const st = $('status');
     st.className = 'status ' + (mine ? 'mine' : 'theirs');
-    st.textContent = mine ? '🎯 Du bist am Zug – wähle ein Ziel im Feindgewässer!' : `⏳ ${S.opp.name} zielt …`;
-    if (mine) Sound.ping();
-    if (!mine && S.mode === 'cpu' && !B.over) setTimeout(cpuMove, 750 + Math.random() * 700);
+    st.textContent = mine ? (again ? '🔥 Treffer! Du darfst nochmal schießen!' : '🎯 Du bist am Zug – wähle ein Ziel im Feindgewässer!')
+      : (again ? `🔥 ${S.opp.name} hat getroffen und schießt nochmal …` : `⏳ ${S.opp.name} zielt …`);
+    if (mine && !again) Sound.ping();
+    if (!mine && S.mode === 'cpu' && !B.over) setTimeout(cpuMove, (B.lastSunk ? 2200 : 750) + Math.random() * 700);
+    B.lastSunk = false;
   }
 
   function fire(r, c) {
@@ -343,7 +344,8 @@
       setTimeout(() => {
         onResult(r, c, res, ship ? { key: ship.key, r: ship.r, c: ship.c, h: ship.h, len: ship.len } : null);
         if (B.cpu.ships.every(s => s.sunk)) return endGame(true, B.cpu.ships);
-        setTurn(res !== 'miss' && S.bonus);
+        if (res === 'sunk') B.lastSunk = true;
+        setTurn(res !== 'miss', res !== 'miss');
       }, 380);
     } else {
       socket.emit('shoot', { r, c });
@@ -360,8 +362,9 @@
     else if (res === 'hit') { Sound.boom(); shake(enBd.board); logAdd(`Du: ${coord(r, c)} – Treffer!`, 'l-hit'); }
     else {
       B.enemySunk.push(ship);
-      enBd.ships.appendChild(shipEl(S.opp.country, ship.key, ship.r, ship.c, ship.h, 'sunk sunk-enemy'));
-      Sound.sunk(); shake(enBd.board);
+      const se = shipEl(S.opp.country, ship.key, ship.r, ship.c, ship.h, 'sunk sunk-enemy');
+      setTimeout(() => enBd.ships.appendChild(se), 450);
+      megaBoom(enBd, ship);
       logAdd(`Du: ${coord(r, c)} – Versenkt! ${shipInfo(S.opp.country, ship.key).name} geht unter.`, 'l-sunk');
       toast(`💥 ${shipInfo(S.opp.country, ship.key).name} versenkt!`);
     }
@@ -375,12 +378,47 @@
     if (res === 'miss') { Sound.splash(); logAdd(`${S.opp.name}: ${coord(r, c)} – Wasser.`); }
     else if (res === 'hit') { Sound.boom(); shake(myBd.board); logAdd(`${S.opp.name}: ${coord(r, c)} – Treffer auf ${shipInfo(S.country, ship.key).name}!`, 'l-hit'); }
     else {
-      const se = myBd.ships.querySelector(`[data-key="${ship.key}"]`); if (se) se.classList.add('sunk');
-      Sound.sunk(); shake(myBd.board);
+      const se = myBd.ships.querySelector(`[data-key="${ship.key}"]`); if (se) setTimeout(() => se.classList.add('sunk'), 450);
+      megaBoom(myBd, ship);
       logAdd(`${S.opp.name}: ${coord(r, c)} – ${shipInfo(S.country, ship.key).name} wurde versenkt!`, 'l-sunk');
     }
     renderSides();
     return res;
+  }
+
+  function megaBoom(bd, s) {
+    const cell = bd.board.clientWidth / N, len = s.len || LEN[s.key];
+    const w = (s.h ? len : 1), h = (s.h ? 1 : len);
+    const box = el('div', 'fx-sink');
+    Object.assign(box.style, { left: s.c * 10 + '%', top: s.r * 10 + '%', width: w * 10 + '%', height: h * 10 + '%' });
+    box.style.setProperty('--cell', cell + 'px');
+    box.appendChild(el('div', 'core'));
+    for (let i = 0; i < len * 4; i++) {
+      const f = el('div', 'fb'), t = ((i % len) + .2 + Math.random() * .6) / len, j = 25 + Math.random() * 50;
+      f.style.setProperty('--x', (s.h ? t * 100 : j) + '%'); f.style.setProperty('--y', (s.h ? j : t * 100) + '%');
+      f.style.setProperty('--d', (Math.floor(i / len) * 160 + (i % len) * 90 + rand(60)) + 'ms');
+      f.style.setProperty('--s', (.8 + Math.random() * 1.1).toFixed(2));
+      box.appendChild(f);
+    }
+    for (let i = 0; i < 3; i++) { const r = el('div', 'ring'); r.style.setProperty('--d', i * 180 + 'ms'); r.style.setProperty('--rs', (len + 2.5 - i * .6) * cell + 'px'); box.appendChild(r); }
+    for (let i = 0; i < 26; i++) {
+      const p = el('div', 'sp');
+      p.style.setProperty('--a', rand(360) + 'deg'); p.style.setProperty('--dist', ((.8 + Math.random() * 1.8) * cell * (1 + len / 3)) + 'px');
+      p.style.setProperty('--d', rand(350) + 'ms'); box.appendChild(p);
+    }
+    for (let i = 0; i < len * 2; i++) {
+      const m = el('div', 'smoke'), t = (i + .5) / (len * 2);
+      m.style.setProperty('--x', (s.h ? t * 100 : 50) + '%'); m.style.setProperty('--y', (s.h ? 50 : t * 100) + '%');
+      m.style.setProperty('--d', (500 + rand(500)) + 'ms'); m.style.setProperty('--dx', (rand(40) - 20) + 'px');
+      box.appendChild(m);
+    }
+    const banner = el('div', 'sunk-banner', 'VERSENKT!');
+    bd.fx.append(box, banner);
+    const flash = el('div', 'screen-flash'); document.body.appendChild(flash);
+    const battle = document.querySelector('.battle'); battle.classList.remove('shake-big'); void battle.offsetWidth; battle.classList.add('shake-big');
+    for (let i = 0; i < Math.min(len, 4); i++) setTimeout(() => Sound.boom(), i * 170);
+    setTimeout(() => Sound.sunk(), 250);
+    setTimeout(() => { box.remove(); banner.remove(); flash.remove(); }, 3200);
   }
 
   function cpuMove() {
@@ -391,7 +429,8 @@
       if (!B || B.over) return;
       const res = onIncoming(r, c);
       if (B.myShips.every(s => s.sunk)) return endGame(false, B.cpu.ships);
-      setTurn(!(res !== 'miss' && S.bonus));
+      if (res === 'sunk') B.lastSunk = true;
+      setTimeout(() => setTurn(res === 'miss', res !== 'miss'), res === 'sunk' ? 1600 : 0);
     }, 380);
   }
 
@@ -526,7 +565,7 @@
     if (code.length < 5) { toast('Bitte den 5-stelligen Code eingeben.'); return; }
     socket.emit('join', { code, name: S.name, country: S.country }, res => {
       if (!res.ok) { toast(res.error || 'Beitritt fehlgeschlagen.'); Sound.err(); return; }
-      S.mode = 'online'; S.code = res.code; S.pid = res.pid; S.bonus = res.bonusShot;
+      S.mode = 'online'; S.code = res.code; S.pid = res.pid; S.bonus = true;
       sess.set({ code: S.code, pid: S.pid });
       history.replaceState(null, '', location.pathname);
       $('joinInvite').classList.add('hidden');
@@ -571,7 +610,7 @@
     });
     socket.on('disconnect', () => { if (S.mode === 'online') toast('Verbindung unterbrochen – verbinde neu …', 4000); });
     socket.on('matched', ({ opp, bonusShot }) => {
-      S.opp = opp; S.bonus = bonusShot; S.oppOnline = true; S.oppReady = false; S.mode = 'online';
+      S.opp = opp; S.bonus = true; S.oppOnline = true; S.oppReady = false; S.mode = 'online';
       B = null; initPlacement(); Sound.ping();
       toast(`${opp.name} ist an Bord! Stellt eure Flotten auf.`);
     });
@@ -588,12 +627,12 @@
       if (!B || B.outgoing.has(K(r, c))) return;
       onResult(r, c, res, ship);
       if (B.over || res === 'sunk' && B.enemySunk.length === FLEET.length) { B.busy = false; return; }
-      setTurn(myTurn);
+      setTurn(myTurn, myTurn && res !== 'miss');
     });
     socket.on('incoming', ({ r, c, myTurn }) => {
       if (!B || B.incoming.has(K(r, c))) return;
-      onIncoming(r, c);
-      if (!B.myShips.every(s => s.sunk)) setTurn(myTurn);
+      const res = onIncoming(r, c);
+      if (!B.myShips.every(s => s.sunk)) setTurn(myTurn, !myTurn && res !== 'miss');
     });
     socket.on('gameover', ({ won, oppShips }) => { if (B && !B.over) endGame(won, oppShips); });
     socket.on('oppRematch', () => {
@@ -615,7 +654,7 @@
   }
 
   function applySync(st) {
-    S.mode = 'online'; S.code = st.code; S.bonus = st.bonusShot;
+    S.mode = 'online'; S.code = st.code; S.bonus = true;
     if (st.me) { S.name = st.me.name; S.country = st.me.country; }
     if (st.opp) { S.opp = st.opp; S.oppOnline = st.opp.online !== false; }
     S.oppReady = st.oppReady;
