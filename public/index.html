@@ -70,6 +70,7 @@
       <div class="mode-card">
         <h3>🌐 Online 1 gegen 1</h3>
         <button class="btn primary" id="btnHost">Raum erstellen &amp; Link teilen</button>
+        <button class="btn gold" id="btnTourney">🏆 Turnier erstellen</button>
         <div class="join-row">
           <input id="inCode" maxlength="5" placeholder="CODE" autocomplete="off">
           <button class="btn" id="btnJoin">Beitreten</button>
@@ -96,6 +97,33 @@
     <p class="muted" id="lobbyMode"></p>
     <p class="muted">Warte auf Gegner …</p>
     <button class="btn ghost" id="btnLobbyCancel">Abbrechen</button>
+  </div>
+</section>
+
+<!-- TURNIER -->
+<section class="screen hidden" id="scrTourney">
+  <div class="panel tourney">
+    <div class="t-head">
+      <h2>🏆 Turnier <span class="t-code" id="tCode"></span></h2>
+      <span class="mode-badge" id="tMode"></span>
+    </div>
+    <div class="t-invite" id="tInvite">
+      <p class="muted">Schick diesen Link an alle Mitspieler:</p>
+      <div class="link-row">
+        <input id="tLink" readonly>
+        <button class="btn" id="btnTCopy">Kopieren</button>
+        <button class="btn hidden" id="btnTShare">📤 Teilen</button>
+      </div>
+    </div>
+    <div class="t-msg" id="tMsg"></div>
+    <div class="t-cols">
+      <div><h3>Teilnehmer</h3><div class="t-parts" id="tParts"></div></div>
+      <div><h3>Spielplan</h3><div class="t-bracket" id="tBracket"></div></div>
+    </div>
+    <div class="t-actions">
+      <button class="btn primary big hidden" id="btnTStart">🎲 Turnier starten &amp; Paarungen auslosen</button>
+      <button class="btn ghost" id="btnTLeave">Turnier verlassen</button>
+    </div>
   </div>
 </section>
 

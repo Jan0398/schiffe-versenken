@@ -21,6 +21,8 @@ Spielen: Seite öffnen → Name + Marine wählen → **Raum erstellen & Link tei
 
 Spielmodi: **Klassisch** oder **Mit Power-ups** (EMP, Artilleriebeschuss, Nuke, Radar – je Spieler eines, einmal einsetzbar).
 
+**Turnier:** „🏆 Turnier erstellen“ → Link an alle schicken → Host startet. Paarungen werden jede Runde neu ausgelost (K.-o.-System); bei ungerader Spielerzahl kommt automatisch ein Bot (Normal) dazu.
+
 Hinweis Free-Plan: Nach ca. 15 Minuten ohne Besucher schläft der Server ein; der erste Aufruf dauert dann etwa 30–60 Sekunden.
 
 ## Regeln (klassisch, wie das Hasbro-Brettspiel)

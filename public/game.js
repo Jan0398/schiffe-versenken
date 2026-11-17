@@ -73,7 +73,7 @@
 
   /* ================= UI-Helfer ================= */
   function show(id) {
-    ['scrMenu', 'scrLobby', 'scrPlace', 'scrBattle'].forEach(s => $(s).classList.toggle('hidden', s !== id));
+    ['scrMenu', 'scrLobby', 'scrPlace', 'scrBattle', 'scrTourney'].forEach(s => $(s).classList.toggle('hidden', s !== id));
     S.screen = id; window.scrollTo({ top: 0 });
   }
   let toastT;
@@ -120,7 +120,7 @@
     b.onclick = () => { S.diff = b.dataset.v; store.set('sv_diff', S.diff); $$('#segDiff button').forEach(x => x.classList.toggle('on', x === b)); Sound.click(); };
   });
   function $$(sel) { return [...document.querySelectorAll(sel)]; }
-  $('brandHome').onclick = () => { if (S.screen === 'scrMenu') return; confirmLeave(); };
+  $('brandHome').onclick = () => { if (S.screen === 'scrMenu') return; if (S.screen === 'scrLobby') return toMenu(true); confirmLeave(); };
 
   const MODE_HINT = { classic: 'Klassische Regeln: Wer trifft, darf nochmal schießen.', power: 'Wie klassisch – plus ein Power-up pro Spieler: EMP, Artilleriebeschuss, Nuke oder Radar. Einmal einsetzbar, ersetzt deinen Schuss.' };
   const MODE_NOTE = ' Gilt für Spiele gegen den Computer und für Räume, die du erstellst – beim Beitreten legt der Gastgeber den Modus fest.';
@@ -220,7 +220,7 @@
     renderPlace();
   }
   function renderPlaceVs() {
-    $('placeVs').innerHTML = `<span class="mode-badge">${S.powerups ? '⚡ Power-ups' : '⚓ Klassisch'}</span> ${flagSVG(S.country)} <span>${esc(S.name)}</span> <b style="color:var(--red)">VS</b> ${flagSVG(S.opp.country)} <span>${esc(S.opp.name)}</span>`;
+    $('placeVs').innerHTML = `${S.tcode && S.tround ? `<span class="mode-badge t-badge">🏆 Runde ${S.tround}</span> ` : ''}<span class="mode-badge">${S.powerups ? '⚡ Power-ups' : '⚓ Klassisch'}</span> ${flagSVG(S.country)} <span>${esc(S.name)}</span> <b style="color:var(--red)">VS</b> ${flagSVG(S.opp.country)} <span>${esc(S.opp.name)}</span>`;
   }
   function buildPlaceBoard() {
     P.board = makeBoard($('placeBoard'), false, !!COUNTRIES[S.country].space);
@@ -791,6 +791,20 @@
   }
   function showEnd(won) {
     const acc = B.stats.shots ? Math.round(B.stats.hits / B.stats.shots * 100) : 0;
+    if (S.tcode) {
+      modal(`<h2 class="${won ? 'win' : 'lose'}">${won ? 'SIEG!' : 'VERLOREN'}</h2>
+        <p>${won ? `Stark, Kapitän ${esc(S.name)}! Du bist eine Runde weiter.${B.forfeit ? ' (Dein Gegner hat aufgegeben.)' : ''}` : `${esc(S.opp.name)} war stärker – du bist leider ausgeschieden.`}</p>
+        <div class="stats"><div><b>${B.stats.shots}</b><small>Schüsse</small></div><div><b>${B.stats.hits}</b><small>Treffer</small></div><div><b>${acc}%</b><small>Quote</small></div></div>
+        <button class="btn primary" id="mTour">🏆 Zur Turnierübersicht</button>
+        <button class="btn ghost small" id="mView">Spielfeld ansehen</button>`);
+      $('mTour').onclick = () => { closeModal(); showTourney(); };
+      $('mView').onclick = () => {
+        closeModal();
+        const b = el('button', 'btn small', 'Turnierübersicht'); b.style.marginLeft = '10px';
+        b.onclick = () => showTourney(); $('status').appendChild(b);
+      };
+      return;
+    }
     modal(`<h2 class="${won ? 'win' : 'lose'}">${won ? 'SIEG!' : 'VERLOREN'}</h2>
       <p>${won ? `Glückwunsch, Kapitän ${esc(S.name)}! Du hast ${esc(S.opp.name)} besiegt.` : `${esc(S.opp.name)} hat deine Flotte versenkt.`}</p>
       <div class="stats"><div><b>${B.stats.shots}</b><small>Schüsse</small></div><div><b>${B.stats.hits}</b><small>Treffer</small></div><div><b>${acc}%</b><small>Quote</small></div></div>
@@ -812,21 +826,22 @@
 
   $('btnSurrender').onclick = () => {
     if (!B || B.over) return;
-    modal(`<h2 style="font-size:30px">Aufgeben?</h2><p>${S.mode === 'cpu' ? 'Die Partie wird als Niederlage gewertet.' : 'Du verlässt das Online-Spiel. Dein Gegner gewinnt.'}</p>
+    modal(`<h2 style="font-size:30px">Aufgeben?</h2><p>${S.mode === 'cpu' ? 'Die Partie wird als Niederlage gewertet.' : S.tcode ? 'Dein Gegner gewinnt und du scheidest aus dem Turnier aus.' : 'Du verlässt das Online-Spiel. Dein Gegner gewinnt.'}</p>
       <div class="modal-btns"><button class="btn danger" id="mYes">Aufgeben</button><button class="btn" id="mNo">Weiterspielen</button></div>`);
     $('mNo').onclick = closeModal;
-    $('mYes').onclick = () => { closeModal(); if (S.mode === 'cpu') endGame(false, B.cpu.ships); else toMenu(true); };
+    $('mYes').onclick = () => { closeModal(); if (S.mode === 'cpu') endGame(false, B.cpu.ships); else if (S.tcode) { socket.emit('leave'); endGame(false, null); } else toMenu(true); };
   };
 
   function confirmLeave() {
-    modal(`<h2 style="font-size:30px">Zum Hauptmenü?</h2><p>Das laufende Spiel wird beendet.</p>
+    modal(`<h2 style="font-size:30px">Zum Hauptmenü?</h2><p>${S.tcode ? 'Du verlässt das Turnier.' : 'Das laufende Spiel wird beendet.'}</p>
       <div class="modal-btns"><button class="btn danger" id="mYes">Verlassen</button><button class="btn" id="mNo">Bleiben</button></div>`);
     $('mNo').onclick = closeModal; $('mYes').onclick = () => toMenu(true);
   }
   function toMenu(leave) {
     closeModal();
-    if (leave && S.mode === 'online' && socket) socket.emit('leave');
-    sess.clear(); S.mode = null; S.code = null; S.pid = null; B = null; P.board = null;
+    if (leave && S.tcode && socket) socket.emit('tleave');
+    else if (leave && S.mode === 'online' && socket) socket.emit('leave');
+    sess.clear(); S.mode = null; S.code = null; S.pid = null; S.tcode = null; S.tour = null; S.tround = null; B = null; P.board = null;
     show('scrMenu');
   }
 
@@ -908,7 +923,10 @@
     setInviteMode(true); $('inviteCode').textContent = inviteCode; $('inCode').value = inviteCode;
     socket.emit('peek', { code: inviteCode }, res => {
       if (!res.ok) { $('inviteInfo').innerHTML = `<span class="err">${esc(res.error)}</span>`; $('btnAcceptInvite').disabled = true; return; }
-      $('inviteInfo').innerHTML = `${flagSVG(res.hostCountry)} <b>${esc(res.host)}</b> fordert dich heraus<br>Spielmodus: <b>${res.powerups ? '⚡ Mit Power-ups' : '⚓ Klassisch'}</b> <small>(vom Gastgeber festgelegt)</small>`;
+      S.inviteTourney = !!res.tourney;
+      $('inviteInfo').innerHTML = res.tourney
+        ? `🏆 <b>Turnier</b> von ${flagSVG(res.hostCountry)} <b>${esc(res.host)}</b> · ${res.count} ${res.count === 1 ? 'Spieler' : 'Spieler'} angemeldet<br>Spielmodus: <b>${res.powerups ? '⚡ Mit Power-ups' : '⚓ Klassisch'}</b> <small>(vom Gastgeber festgelegt)</small>`
+        : `${flagSVG(res.hostCountry)} <b>${esc(res.host)}</b> fordert dich heraus<br>Spielmodus: <b>${res.powerups ? '⚡ Mit Power-ups' : '⚓ Klassisch'}</b> <small>(vom Gastgeber festgelegt)</small>`;
     });
   }
   $('btnIgnoreInvite').onclick = () => { setInviteMode(false); $('inCode').value = ''; history.replaceState(null, '', location.pathname); };
@@ -918,6 +936,7 @@
     code = (code || '').toUpperCase().trim();
     if (code.length < 5) { toast('Bitte den 5-stelligen Code eingeben.'); return; }
     socket.emit('join', { code, name: S.name, country: S.country }, res => {
+      if (!res.ok && res.tourney) return joinTourney(code);
       if (!res.ok) { toast(res.error || 'Beitritt fehlgeschlagen.'); Sound.err(); return; }
       S.mode = 'online'; S.code = res.code; S.pid = res.pid; S.bonus = true; S.powerups = !!res.powerups;
       sess.set({ code: S.code, pid: S.pid });
@@ -925,7 +944,6 @@
       setInviteMode(false);
     });
   }
-  $('btnAcceptInvite').onclick = () => joinRoom(inviteCode);
   $('btnJoin').onclick = () => joinRoom($('inCode').value);
   $('inCode').addEventListener('keydown', e => { if (e.key === 'Enter') joinRoom($('inCode').value); });
 
@@ -959,15 +977,30 @@
       const ss = sess.get();
       if (!ss) return;
       socket.emit('rejoin', ss, res => {
-        if (!res.ok) { if (S.mode === 'online') { toast('Das Spiel existiert nicht mehr.'); toMenu(false); } else sess.clear(); return; }
-        S.pid = ss.pid; applySync(res.state);
+        if (!res.ok) { if (S.mode === 'online' || S.tcode) { toast('Das Spiel existiert nicht mehr.'); toMenu(false); } else sess.clear(); return; }
+        S.pid = ss.pid;
+        if (res.tourney) {
+          S.tcode = ss.tcode; S.tour = res.tourney; S.powerups = res.tourney.powerups;
+          if (res.state) applySync(res.state);
+          else if (!['scrPlace', 'scrBattle'].includes(S.screen) || !B) showTourney();
+          return;
+        }
+        applySync(res.state);
       });
     });
     socket.on('disconnect', () => { if (S.mode === 'online') toast('Verbindung unterbrochen – verbinde neu …', 4000); });
-    socket.on('matched', ({ opp, powerups }) => {
+    socket.on('matched', ({ opp, powerups, tourney, round }) => {
       S.opp = opp; S.bonus = true; S.powerups = !!powerups; S.oppOnline = true; S.oppReady = false; S.mode = 'online';
+      S.tround = tourney ? round : null;
       B = null; initPlacement(); Sound.ping();
-      toast(`${opp.name} ist an Bord! Stellt eure Flotten auf.`);
+      if (tourney) { diceFx(); toast(`🎲 Runde ${round} ausgelost – dein Gegner: ${opp.name}`, 4000); }
+      else toast(`${opp.name} ist an Bord! Stellt eure Flotten auf.`);
+    });
+    socket.on('tstate', st => {
+      const prev = S.tour;
+      S.tour = st; S.powerups = st.powerups;
+      if (S.screen === 'scrTourney') renderTourney();
+      if (st.phase === 'done' && (!prev || prev.phase !== 'done')) setTimeout(showChampion, S.screen === 'scrBattle' ? 2500 : 300);
     });
     socket.on('oppCountry', ({ country }) => {
       if (!S.opp || !COUNTRIES[country]) return;
@@ -1012,8 +1045,9 @@
       if (!B) return;
       setTimeout(() => revealBlind(reveal, sunk), Math.max(0, B.animUntil - Date.now()));
     });
-    socket.on('gameover', ({ won, oppShips, reveal }) => {
+    socket.on('gameover', ({ won, oppShips, reveal, forfeit }) => {
       if (!B || B.over) return;
+      if (forfeit) { B.forfeit = true; toast(`${S.opp.name} hat aufgegeben bzw. die Verbindung verloren.`, 4000); }
       setTimeout(() => {
         if (reveal) revealBlind(reveal.filter(([r, c]) => B.outgoing.get(K(r, c)) === 'unknown'), []);
         endGame(won, oppShips);
@@ -1038,7 +1072,7 @@
   }
 
   function applySync(st) {
-    S.mode = 'online'; S.code = st.code; S.bonus = true; S.powerups = !!st.powerups;
+    S.mode = 'online'; S.code = st.code; S.bonus = true; S.powerups = !!st.powerups; if (st.tourney) S.tround = st.round;
     if (st.me) { S.name = st.me.name; S.country = st.me.country; }
     if (st.opp) { S.opp = st.opp; S.oppOnline = st.opp.online !== false; }
     S.oppReady = st.oppReady;
@@ -1062,6 +1096,85 @@
     renderBattle();
     if (st.phase === 'over') { endGame(st.won, st.oppShips, true); if (st.myRematch) { const b = $('mRematch'); b.disabled = true; b.textContent = `Warte auf ${S.opp.name} …`; } }
     else setTurn(st.myTurn);
+  }
+
+  /* ================= Turnier ================= */
+  function joinTourney(code) {
+    if (!getName() || !socket) return;
+    socket.emit('tjoin', { code, name: S.name, country: S.country }, res => {
+      if (!res.ok) { toast(res.error || 'Beitritt fehlgeschlagen.'); Sound.err(); return; }
+      S.tcode = res.code; S.pid = res.pid; S.powerups = !!res.powerups;
+      sess.set({ tcode: S.tcode, pid: S.pid });
+      history.replaceState(null, '', location.pathname);
+      setInviteMode(false);
+      showTourney();
+    });
+  }
+  $('btnAcceptInvite').onclick = () => S.inviteTourney ? joinTourney(inviteCode) : joinRoom(inviteCode);
+  $('btnTourney').onclick = () => {
+    if (!getName() || !socket) return;
+    Sound.click();
+    socket.emit('tcreate', { name: S.name, country: S.country, powerups: S.pmode === 'power' }, res => {
+      if (!res.ok) return toast('Turnier konnte nicht erstellt werden.');
+      S.tcode = res.code; S.pid = res.pid; S.powerups = S.pmode === 'power';
+      sess.set({ tcode: S.tcode, pid: S.pid });
+      showTourney();
+    });
+  };
+  function showTourney() { closeModal(); show('scrTourney'); renderTourney(); }
+  function renderTourney() {
+    const T = S.tour;
+    if (!T) { $('tMsg').textContent = 'Lade Turnier …'; return; }
+    $('tCode').textContent = T.code;
+    $('tMode').textContent = T.powerups ? '⚡ Mit Power-ups' : '⚓ Klassisch';
+    const lobby = T.phase === 'lobby';
+    $('tInvite').classList.toggle('hidden', !lobby);
+    $('tLink').value = `${location.origin}${location.pathname}?room=${T.code}`;
+    $('btnTShare').classList.toggle('hidden', !navigator.share);
+    const humans = T.parts.filter(p => !p.bot).length;
+    let msg;
+    if (lobby) msg = T.isHost
+      ? `Teile den Link und starte, sobald alle da sind. ${humans % 2 ? 'Bei ungerader Spielerzahl kommt automatisch ein Bot (Normal) dazu.' : ''} Die Paarungen werden ausgelost.`
+      : `Warte, bis ${esc(T.hostName || 'der Gastgeber')} das Turnier startet …`;
+    else if (T.phase === 'done') msg = T.champion ? `🏆 <b>${esc(T.champion.name)}</b> ist Turniersieger!` : 'Das Turnier ist beendet.';
+    else if (T.myStatus === 'waiting') msg = '✅ Du bist weiter! Sobald alle Partien der Runde fertig sind, wird neu ausgelost …';
+    else if (T.myStatus === 'out') msg = '❌ Du bist ausgeschieden – du kannst den Spielplan weiter verfolgen.';
+    else if (T.myStatus === 'playing') msg = '⚔️ Deine Partie läuft.';
+    else msg = '';
+    $('tMsg').innerHTML = msg;
+    $('tMsg').className = 't-msg ' + (T.phase === 'done' ? 'champ' : T.myStatus || '');
+    const statusTxt = { waiting: lobby ? 'bereit' : 'weiter', playing: 'spielt', out: 'ausgeschieden', champion: '🏆 Sieger' };
+    $('tParts').innerHTML = T.parts.map(p => `<div class="t-part ${p.status}${p.me ? ' me' : ''}">${flagSVG(p.country)}<span>${esc(p.name)}${p.bot ? ' <i class="bot">BOT</i>' : ''}${p.me ? ' <i>(du)</i>' : ''}${p.online ? '' : ' <i class="off">offline</i>'}</span><small>${statusTxt[p.status] || ''}</small></div>`).join('')
+      + (lobby && humans % 2 ? '<div class="t-part ghost">🤖 <span>+ Bot (Normal) beim Start</span></div>' : '');
+    const pl = x => x ? `${flagSVG(x.country)}<span>${esc(x.name)}${x.bot ? ' <i class="bot">BOT</i>' : ''}</span>` : '?';
+    $('tBracket').innerHTML = T.rounds.length ? T.rounds.map((rd, i) => `<div class="t-round"><div class="t-rtitle">🎲 Runde ${i + 1}${rd.length === 1 && i === T.rounds.length - 1 ? ' · Finale' : ''}</div>` +
+      rd.map(m => `<div class="t-match${m.a && m.a.me || m.b && m.b.me ? ' mine' : ''}"><div class="t-p ${m.winner === 'a' ? 'win' : m.winner ? 'lose' : ''}">${pl(m.a)}</div><b class="t-vs">vs</b><div class="t-p ${m.winner === 'b' ? 'win' : m.winner ? 'lose' : ''}">${pl(m.b)}</div><small>${m.winner ? (m.forfeit ? 'kampflos' : '✔') : 'läuft …'}</small></div>`).join('') + '</div>').reverse().join('')
+      : '<p class="muted">Noch nicht ausgelost.</p>';
+    $('btnTStart').classList.toggle('hidden', !(lobby && T.isHost));
+    $('btnTStart').disabled = T.parts.length < 2;
+    $('btnTLeave').textContent = T.phase === 'done' ? 'Zum Hauptmenü' : 'Turnier verlassen';
+  }
+  $('btnTStart').onclick = () => { Sound.click(); socket.emit('tstart'); };
+  $('btnTLeave').onclick = () => { if (S.tour && S.tour.phase === 'done') return toMenu(true); confirmLeave(); };
+  $('btnTCopy').onclick = async () => {
+    const v = $('tLink').value;
+    try { await navigator.clipboard.writeText(v); } catch { $('tLink').select(); document.execCommand('copy'); }
+    toast('Link kopiert!');
+  };
+  $('btnTShare').onclick = () => navigator.share({ title: 'Schiffe-versenken-Turnier', text: `${S.name} lädt dich zu einem Schiffe-versenken-Turnier ein!`, url: $('tLink').value }).catch(() => { });
+  function showChampion() {
+    const T = S.tour; if (!T || !T.champion) return;
+    const me = T.champion.me;
+    if (me) Sound.win();
+    modal(`<h2 class="${me ? 'win' : ''}" style="font-size:40px">🏆 ${me ? 'TURNIERSIEG!' : 'Turnier beendet'}</h2>
+      <p>${flagSVG(T.champion.country)} <b>${esc(T.champion.name)}</b> ${me ? '– das bist du! Unbesiegt auf allen Meeren.' : 'gewinnt das Turnier.'}</p>
+      <div class="modal-btns"><button class="btn primary" id="mTour">Spielplan ansehen</button><button class="btn" id="mMenu">Hauptmenü</button></div>`);
+    $('mTour').onclick = () => showTourney();
+    $('mMenu').onclick = () => toMenu(true);
+  }
+  function diceFx() {
+    const d = el('div', 'dice-fx', '🎲'); document.body.appendChild(d); setTimeout(() => d.remove(), 1600);
+    [0, 120, 240, 360].forEach(t => setTimeout(() => Sound.tone(500 + rand(500), 300, .06, .08, 'square'), t));
   }
 
   /* ================= Start ================= */
