@@ -1,13 +1,16 @@
-/* Schiffe versenken – Spiellogik & Oberfläche */
+/* Schiffe versenken – Oberfläche. Die Spiellogik läuft auf dem Server (auch gegen den Computer). */
 (function () {
   const { FLEET, LEN, COUNTRIES, shipSVG, flagSVG } = Ships;
   const N = 10, ROWS = 'ABCDEFGHIJ';
   const $ = id => document.getElementById(id);
+  const $$ = sel => [...document.querySelectorAll(sel)];
   const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
   const K = (r, c) => r + ',' + c;
   const coord = (r, c) => ROWS[r] + (c + 1);
   const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
   const rand = n => Math.floor(Math.random() * n);
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const inB = (r, c) => r >= 0 && c >= 0 && r < N && c < N;
   const store = {
     get(k, d = null) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch { return d; } },
     set(k, v) { try { localStorage.setItem(k, v); } catch { } },
@@ -17,12 +20,15 @@
     set(v) { try { sessionStorage.setItem('sv_sess', JSON.stringify(v)); } catch { } },
     clear() { try { sessionStorage.removeItem('sv_sess'); } catch { } },
   };
-  const shipInfo = (cc, key) => COUNTRIES[cc].ships[key];
+  const shipInfo = (cc, key) => (COUNTRIES[cc] || COUNTRIES.de).ships[key];
+  const shipName = s => shipInfo(s.cc, s.key).name + (String(s.id).startsWith('cap') ? ' (gekapert)' : '');
 
   const S = {
     name: store.get('sv_name', ''), country: store.get('sv_country', 'de'), diff: store.get('sv_diff', 'normal'),
-    bonus: true, pmode: store.get('sv_pmode', 'classic'), powerups: false, mode: null, opp: null, code: null, pid: null,
-    oppOnline: true, oppReady: false, screen: 'scrMenu',
+    pmode: store.get('sv_pmode', 'classic'), events: store.get('sv_events') === '1', size: +store.get('sv_size', '2') === 3 ? 3 : 2,
+    screen: 'scrMenu', code: null, pid: null, tcode: null, tour: null, solo: false,
+    // Partie
+    seats: [], mySeat: 0, msize: 2, powerups: false, mevents: false, nPowers: 0, tround: null,
   };
   if (!COUNTRIES[S.country]) S.country = 'de';
 
@@ -40,16 +46,16 @@
       const len = Math.floor(ac.sampleRate * dur), buf = ac.createBuffer(1, len, ac.sampleRate), d = buf.getChannelData(0);
       for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
       const src = ac.createBufferSource(); src.buffer = buf;
-      const f = ac.createBiquadFilter(), t = ac.currentTime;
+      const f = ac.createBiquadFilter(), t = ac.currentTime + (o.delay || 0);
       f.type = o.type || 'lowpass'; f.frequency.setValueAtTime(o.freq || 1000, t); f.Q.value = o.q || 1;
       if (o.freqEnd) f.frequency.exponentialRampToValueAtTime(o.freqEnd, t + dur);
       const g = ac.createGain();
       g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(o.gain || .4, t + (o.attack || .005)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
       src.connect(f).connect(g).connect(ac.destination); src.start(t);
     },
-    tone(f0, f1, dur, gain = .25, type = 'sine') {
+    tone(f0, f1, dur, gain = .25, type = 'sine', delay = 0) {
       const ac = this.ac(); if (!ac) return;
-      const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime;
+      const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime + delay;
       o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(Math.max(f1, 20), t + dur);
       g.gain.setValueAtTime(gain, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
       o.connect(g).connect(ac.destination); o.start(t); o.stop(t + dur + .02);
@@ -57,15 +63,21 @@
     shot() { this.noise(.2, { type: 'highpass', freq: 800, gain: .22 }); this.tone(150, 45, .18, .35); },
     splash() { this.noise(.75, { type: 'bandpass', freq: 1500, freqEnd: 350, q: .7, gain: .35, attack: .04 }); },
     boom() { this.noise(1, { type: 'lowpass', freq: 1000, freqEnd: 100, gain: .85 }); this.tone(95, 28, .7, .5); },
-    sunk() { this.boom(); setTimeout(() => this.noise(1.8, { type: 'lowpass', freq: 320, freqEnd: 50, gain: .6, attack: .15 }), 260); },
-    win() { [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => this.tone(f, f, .3, .18, 'triangle'), i * 150)); },
-    lose() { [392, 330, 262, 196].forEach((f, i) => setTimeout(() => this.tone(f, f * .97, .4, .18, 'triangle'), i * 220)); },
+    sunk() { this.boom(); this.noise(1.8, { type: 'lowpass', freq: 320, freqEnd: 50, gain: .6, attack: .15, delay: .26 }); },
+    win() { [523, 659, 784, 1046].forEach((f, i) => this.tone(f, f, .3, .18, 'triangle', i * .15)); },
+    lose() { [392, 330, 262, 196].forEach((f, i) => this.tone(f, f * .97, .4, .18, 'triangle', i * .22)); },
     click() { this.tone(700, 500, .05, .06, 'square'); },
     err() { this.tone(170, 120, .15, .12, 'square'); },
     ping() { this.tone(1200, 1150, .5, .12, 'sine'); },
-    emp() { this.tone(2400, 60, .9, .18, 'sawtooth'); this.noise(.8, { type: 'bandpass', freq: 3000, freqEnd: 300, q: 2, gain: .25 }); setTimeout(() => this.tone(60, 40, .5, .2, 'square'), 200); },
-    radar() { [0, 350, 700].forEach(t => setTimeout(() => this.tone(1500, 1450, .35, .12, 'sine'), t)); },
-    nuke() { this.noise(2.8, { type: 'lowpass', freq: 1400, freqEnd: 40, gain: 1, attack: .01 }); this.tone(70, 18, 2.2, .7); setTimeout(() => this.noise(2.2, { type: 'lowpass', freq: 400, freqEnd: 40, gain: .7, attack: .3 }), 400); },
+    emp() { this.tone(2400, 60, .9, .18, 'sawtooth'); this.noise(.8, { type: 'bandpass', freq: 3000, freqEnd: 300, q: 2, gain: .25 }); this.tone(60, 40, .5, .2, 'square', .2); },
+    radar() { [0, .35, .7].forEach(t => this.tone(1500, 1450, .35, .12, 'sine', t)); },
+    nuke() { this.noise(2.8, { type: 'lowpass', freq: 1400, freqEnd: 40, gain: 1, attack: .01 }); this.tone(70, 18, 2.2, .7); this.noise(2.2, { type: 'lowpass', freq: 400, freqEnd: 40, gain: .7, attack: .3, delay: .4 }); },
+    fanfare() { [392, 523, 392, 659].forEach((f, i) => this.tone(f, f, .18, .14, 'square', i * .13)); },
+    iceberg() { this.noise(1.6, { type: 'highpass', freq: 2500, freqEnd: 600, gain: .3, attack: .3 }); [0, .25, .4].forEach(t => this.noise(.25, { type: 'bandpass', freq: 1800, q: 4, gain: .5, delay: 1.2 + t })); this.tone(70, 30, 1.2, .35, 'sine', 1.3); },
+    pirates() { this.tone(220, 220, .35, .18, 'sawtooth'); this.tone(277, 277, .35, .18, 'sawtooth', .35); this.tone(330, 330, .6, .18, 'sawtooth', .7); [1.4, 1.7, 2.0].forEach(t => { this.noise(.4, { type: 'lowpass', freq: 900, freqEnd: 100, gain: .6, delay: t }); }); },
+    storm() { this.noise(3.2, { type: 'bandpass', freq: 400, freqEnd: 1600, q: .6, gain: .5, attack: .8 }); this.noise(2.5, { type: 'bandpass', freq: 900, freqEnd: 300, q: .8, gain: .3, attack: .5, delay: .6 }); },
+    diarrhea() { [0, .18, .36].forEach((t, i) => this.tone(180 - i * 30, 60, .25, .22, 'sawtooth', t)); this.tone(90, 40, .9, .25, 'square', .7); this.noise(.6, { type: 'lowpass', freq: 300, gain: .3, delay: 1.6 }); },
+    kraken() { this.tone(55, 30, 2.5, .5, 'sawtooth'); this.tone(82, 40, 2.2, .3, 'sine', .2); this.noise(2.4, { type: 'lowpass', freq: 500, freqEnd: 60, gain: .55, attack: .6, delay: .8 }); },
   };
   function updateSoundBtn() { $('btnSound').textContent = Sound.on ? '🔊' : '🔇'; }
   $('btnSound').onclick = () => { Sound.on = !Sound.on; store.set('sv_sound', Sound.on ? '1' : '0'); updateSoundBtn(); };
@@ -81,9 +93,10 @@
     const t = $('toast'); t.textContent = msg; t.classList.remove('hidden');
     clearTimeout(toastT); toastT = setTimeout(() => t.classList.add('hidden'), ms);
   }
-  function modal(html) { $('modalBox').innerHTML = html; $('modal').classList.remove('hidden'); }
-  function closeModal() { $('modal').classList.add('hidden'); }
-  function shake(node) { node.classList.remove('shake'); void node.offsetWidth; node.classList.add('shake'); }
+  function modal(html, wide = false) { $('modalBox').innerHTML = html; $('modalBox').classList.toggle('wide', wide); $('modal').classList.remove('hidden'); }
+  function closeModal() { $('modal').classList.add('hidden'); $('modalBox').classList.remove('wide'); }
+  function shake(node) { if (!node) return; node.classList.remove('shake'); void node.offsetWidth; node.classList.add('shake'); }
+  const seatName = s => (S.seats[s] || {}).name || '?';
 
   /* ================= Menü ================= */
   function countryGrid(box, onPick) {
@@ -115,31 +128,30 @@
     S.name = n; store.set('sv_name', n); return n;
   }
   $('inName').value = S.name;
-  $$('#segDiff button').forEach(b => {
-    b.classList.toggle('on', b.dataset.v === S.diff);
-    b.onclick = () => { S.diff = b.dataset.v; store.set('sv_diff', S.diff); $$('#segDiff button').forEach(x => x.classList.toggle('on', x === b)); Sound.click(); };
-  });
-  function $$(sel) { return [...document.querySelectorAll(sel)]; }
-  $('brandHome').onclick = () => { if (S.screen === 'scrMenu') return; if (S.screen === 'scrLobby') return toMenu(true); confirmLeave(); };
-
-  const MODE_HINT = { classic: 'Klassische Regeln: Wer trifft, darf nochmal schießen.', power: 'Wie klassisch – plus ein Power-up pro Spieler: EMP, Artilleriebeschuss, Nuke oder Radar. Einmal einsetzbar, ersetzt deinen Schuss.' };
-  const MODE_NOTE = ' Gilt für Spiele gegen den Computer und für Räume, die du erstellst – beim Beitreten legt der Gastgeber den Modus fest.';
-  function renderMode() {
-    $$('#segMode button').forEach(x => x.classList.toggle('on', x.dataset.v === S.pmode));
-    $('modeHint').textContent = MODE_HINT[S.pmode] + MODE_NOTE;
+  function segBind(id, key, storeKey, after) {
+    $$(`#${id} button`).forEach(b => b.onclick = () => {
+      S[key] = key === 'size' ? +b.dataset.v : b.dataset.v; store.set(storeKey, String(S[key])); Sound.click(); renderOptions(); if (after) after();
+    });
   }
-  $$('#segMode button').forEach(b => b.onclick = () => { S.pmode = b.dataset.v; store.set('sv_pmode', S.pmode); Sound.click(); renderMode(); });
-  renderMode();
-
-  const DIFF_LABEL = { easy: 'Leicht', normal: 'Normal', hard: 'Schwer' };
-  $('btnCpu').onclick = () => {
-    if (!getName()) return;
-    Sound.click();
-    const others = Object.keys(COUNTRIES).filter(c => c !== S.country);
-    S.mode = 'cpu'; S.powerups = S.pmode === 'power'; S.opp = { name: 'Computer (' + DIFF_LABEL[S.diff] + ')', country: others[rand(others.length)] };
-    S.oppOnline = true; S.oppReady = true;
-    initPlacement();
-  };
+  segBind('segDiff', 'diff', 'sv_diff');
+  segBind('segMode', 'pmode', 'sv_pmode');
+  segBind('segSize', 'size', 'sv_size');
+  $('chkEvents').onchange = e => { S.events = e.target.checked; store.set('sv_events', S.events ? '1' : '0'); renderOptions(); };
+  function renderOptions() {
+    $$('#segDiff button').forEach(x => x.classList.toggle('on', x.dataset.v === S.diff));
+    $$('#segMode button').forEach(x => x.classList.toggle('on', x.dataset.v === S.pmode));
+    $$('#segSize button').forEach(x => x.classList.toggle('on', +x.dataset.v === S.size));
+    $('chkEvents').checked = S.events;
+    const parts = [];
+    parts.push(S.size === 3 ? 'Jeder gegen jeden: Du schießt pro Schuss frei auf einen der beiden Gegner. Wer zuletzt noch schwimmt, gewinnt.' : 'Klassisch 1 gegen 1.');
+    if (S.pmode === 'power') parts.push(`Power-ups: ${S.size === 3 ? 'zwei' : 'eines'} pro Spieler (EMP, Artilleriebeschuss ×2, Nuke, Radar).`);
+    if (S.events) parts.push('Zufallsereignisse sind an – etwa 2–3 pro Partie.');
+    parts.push('Gilt für Spiele gegen den Computer und für Räume/Turniere, die du erstellst (Turniere immer 1 gegen 1).');
+    $('modeHint').textContent = parts.join(' ');
+    $('btnHost').textContent = S.size === 3 ? '3er-Raum erstellen & Link teilen' : 'Raum erstellen & Link teilen';
+  }
+  renderOptions();
+  $('brandHome').onclick = () => { if (S.screen === 'scrMenu') return; if (S.screen === 'scrLobby') return toMenu(true); confirmLeave(); };
 
   /* ================= Spielfeld ================= */
   function makeBoard(host, enemy = false, space = false) {
@@ -159,11 +171,11 @@
     const at = e => { const ce = e.target.closest('.cell'); return ce ? [+ce.dataset.r, +ce.dataset.c] : null; };
     return { host, board, fx, ships, cellsL, cells, at, cell: (r, c) => cells[r * N + c], peg: (r, c) => pegArr[r * N + c] };
   }
-  function shipEl(cc, key, r, c, h, extra = '') {
+  function shipEl(cc, key, r, c, h, extra = '', id = '') {
     const len = LEN[key], d = el('div', 'ship ' + extra);
     d.style.left = c * 10 + '%'; d.style.top = r * 10 + '%';
     d.style.width = (h ? len : 1) * 10 + '%'; d.style.height = (h ? 1 : len) * 10 + '%';
-    d.dataset.key = key;
+    d.dataset.key = key; d.dataset.id = id || key;
     d.innerHTML = shipSVG(cc, key, h);
     return d;
   }
@@ -171,14 +183,12 @@
     const p = bd.peg(r, c);
     p.className = 'peg ' + type + (anim ? ' new' : '');
     bd.cell(r, c).classList.add('shot');
-    if (anim && type !== 'miss') {
-      const fx = el('div', 'fx-boom'); p.appendChild(fx); setTimeout(() => fx.remove(), 700);
-    }
+    if (anim && type !== 'miss' && type !== 'unk') { const fx = el('div', 'fx-boom'); p.appendChild(fx); setTimeout(() => fx.remove(), 700); }
   }
+  const pegType = v => v === 'unknown' ? 'unk' : v === 'miss' ? 'miss' : 'hit';
 
   /* ================= Aufstellung ================= */
   const cellsOf = (key, r, c, h) => Array.from({ length: LEN[key] }, (_, i) => h ? [r, c + i] : [r + i, c]);
-  const inB = (r, c) => r >= 0 && c >= 0 && r < N && c < N;
   function keyAt(placed, r, c) {
     for (const [k, p] of Object.entries(placed)) if (cellsOf(k, p.r, p.c, p.h).some(([a, b]) => a === r && b === c)) return k;
     return null;
@@ -208,19 +218,37 @@
     }
   }
 
-  const P = { placed: {}, sel: null, h: true, hover: null, board: null, locked: false };
+  const POWERS = {
+    emp: { icon: '⚡', name: 'EMP', desc: 'Ein Gegner schießt 5 Züge lang blind – seine Zielanzeige ist gestört.', target: false },
+    artillery: { icon: '💥', name: 'Artilleriebeschuss', desc: 'Trifft 3 Felder nebeneinander – 2× einsetzbar. Drehen mit R.', target: true },
+    nuke: { icon: '☢️', name: 'Nuke', desc: 'Trifft ein Quadrat von 4×4 Feldern mit einem Schlag.', target: true },
+    radar: { icon: '📡', name: 'Radar', desc: 'Zeigt in einem 2×2-Feld, ob dort ein feindliches Schiff liegt.', target: true },
+  };
+  const EVENTS = {
+    iceberg: { icon: '🧊', title: 'EISBERG!', txt: s => `Ein Eisberg rammt ein Schiff von ${s}!` },
+    pirates: { icon: '🏴‍☠️', title: 'PIRATENANGRIFF!', txt: (s, f) => `Piraten kapern ein Schiff von ${f} – es segelt jetzt für ${s}!` },
+    storm: { icon: '🌪️', title: 'ORKANBÖEN!', txt: s => `Ein Orkan wirbelt die unbeschädigten Schiffe von ${s} durcheinander!` },
+    diarrhea: { icon: '🚽', title: 'DURCHFALL VOM KAPITÄN!', txt: s => `Der Kapitän von ${s} muss dringend … ein Aushilfsschütze übernimmt: die nächsten 3 Schüsse gehen ein Feld daneben!` },
+    kraken: { icon: '🐙', title: 'DER KRAKEN!', txt: s => `Ein Riesenkraken zieht ein Schiff von ${s} in die Tiefe!` },
+  };
+
+  const P = { placed: {}, sel: null, h: true, hover: null, board: null, locked: false, powers: [] };
   function nextUnplaced() { const f = FLEET.find(f => !P.placed[f.key]); return f ? f.key : null; }
 
   function initPlacement() {
     closeModal();
-    P.placed = {}; P.sel = 'carrier'; P.h = true; P.hover = null; P.locked = false; P.power = null; S.oppReady = S.mode === 'cpu';
+    P.placed = {}; P.sel = 'carrier'; P.h = true; P.hover = null; P.locked = false; P.powers = [];
     buildPlaceBoard();
     $('waitMsg').classList.add('hidden');
     show('scrPlace');
     renderPlace();
   }
   function renderPlaceVs() {
-    $('placeVs').innerHTML = `${S.tcode && S.tround ? `<span class="mode-badge t-badge">🏆 Runde ${S.tround}</span> ` : ''}<span class="mode-badge">${S.powerups ? '⚡ Power-ups' : '⚓ Klassisch'}</span> ${flagSVG(S.country)} <span>${esc(S.name)}</span> <b style="color:var(--red)">VS</b> ${flagSVG(S.opp.country)} <span>${esc(S.opp.name)}</span>`;
+    const opps = S.seats.filter(s => s.seat !== S.mySeat);
+    $('placeVs').innerHTML = `${S.tcode && S.tround ? `<span class="mode-badge t-badge">🏆 Runde ${S.tround}</span> ` : ''}` +
+      `<span class="mode-badge">${S.powerups ? '⚡ Power-ups' : '⚓ Klassisch'}${S.mevents ? ' · 🎲 Ereignisse' : ''}</span> ` +
+      `${flagSVG(S.country)} <span>${esc(S.name)}</span> <b style="color:var(--red)">VS</b> ` +
+      opps.map(o => `${flagSVG(o.country)} <span>${esc(o.name)}${o.ready ? ' ✔' : ''}</span>`).join(' <b style="color:var(--red)">&amp;</b> ');
   }
   function buildPlaceBoard() {
     P.board = makeBoard($('placeBoard'), false, !!COUNTRIES[S.country].space);
@@ -230,23 +258,7 @@
     L.addEventListener('click', e => { const a = P.board.at(e); if (a) placeAt(a[0], a[1]); });
     L.addEventListener('contextmenu', e => { e.preventDefault(); rotate(); });
     renderPlaceVs();
-    $('btnFaction').disabled = P.locked;
   }
-  function openFactionPicker() {
-    if (P.locked) { toast('Nach „Bereit“ kann die Fraktion nicht mehr gewechselt werden.'); return; }
-    modal(`<h2 style="font-size:28px">Fraktion wählen</h2><p>Deine Aufstellung bleibt erhalten.</p><div class="countries modal-countries" id="mCountries"></div><button class="btn ghost" id="mClose">Schließen</button>`);
-    $('modalBox').classList.add('wide');
-    countryGrid($('mCountries'), cc => {
-      closeModal(); $('modalBox').classList.remove('wide');
-      if (cc === S.country) return;
-      S.country = cc; store.set('sv_country', cc); Sound.click();
-      if (S.mode === 'online' && socket) socket.emit('setCountry', { country: cc });
-      buildPlaceBoard(); renderPlace(); renderCountries(); renderFleetPreview();
-      toast(`Du kommandierst jetzt: ${COUNTRIES[cc].name}`);
-    });
-    $('mClose').onclick = () => { closeModal(); $('modalBox').classList.remove('wide'); };
-  }
-  $('btnFaction').onclick = openFactionPicker;
   function renderPlace() {
     if (!P.board) return;
     const L = P.board.ships; L.innerHTML = '';
@@ -260,16 +272,22 @@
     }
     renderDock();
     renderPowerPick();
-    $('btnReady').disabled = Object.keys(P.placed).length < FLEET.length || P.locked || (S.powerups && !P.power);
+    $('btnReady').disabled = Object.keys(P.placed).length < FLEET.length || P.locked || (S.nPowers && P.powers.length !== S.nPowers);
     ['btnRotate', 'btnRandom', 'btnClear', 'btnFaction'].forEach(b => $(b).disabled = P.locked);
   }
   function renderPowerPick() {
     const box = $('powerPick');
-    box.classList.toggle('hidden', !S.powerups);
-    if (!S.powerups) return;
-    box.innerHTML = '<div class="pp-title">Wähle dein Power-up <small>(nur eines, einmal einsetzbar)</small></div>' +
-      Object.entries(POWERS).map(([k, v]) => `<div class="pp-card${P.power === k ? ' on' : ''}${P.locked ? ' locked' : ''}" data-k="${k}"><span>${v.icon}</span><div><b>${v.name}</b><small>${v.desc}</small></div></div>`).join('');
-    box.querySelectorAll('.pp-card').forEach(c => c.onclick = () => { if (P.locked) return; P.power = c.dataset.k; Sound.click(); renderPlace(); });
+    box.classList.toggle('hidden', !S.nPowers);
+    if (!S.nPowers) return;
+    box.innerHTML = `<div class="pp-title">Wähle ${S.nPowers === 2 ? '2 Power-ups' : 'dein Power-up'} <small>(${P.powers.length}/${S.nPowers})</small></div>` +
+      Object.entries(POWERS).map(([k, v]) => `<div class="pp-card${P.powers.includes(k) ? ' on' : ''}${P.locked ? ' locked' : ''}" data-k="${k}"><span>${v.icon}</span><div><b>${v.name}</b><small>${v.desc}</small></div></div>`).join('');
+    box.querySelectorAll('.pp-card').forEach(c => c.onclick = () => {
+      if (P.locked) return;
+      const k = c.dataset.k;
+      if (P.powers.includes(k)) P.powers = P.powers.filter(x => x !== k);
+      else { P.powers.push(k); if (P.powers.length > S.nPowers) P.powers.shift(); }
+      Sound.click(); renderPlace();
+    });
   }
   function renderDock() {
     const box = $('dock'); box.innerHTML = '';
@@ -291,386 +309,541 @@
     const k = keyAt(P.placed, r, c);
     if (k) { P.sel = k; P.h = P.placed[k].h; delete P.placed[k]; P.hover = [r, c]; Sound.click(); renderPlace(); return; }
     if (!P.sel) return;
-    if (canPlace(P.placed, P.sel, r, c, P.h)) {
-      P.placed[P.sel] = { r, c, h: P.h }; P.sel = nextUnplaced(); Sound.tone(300, 500, .08, .12, 'triangle');
-    } else { Sound.err(); shake(P.board.board); }
+    if (canPlace(P.placed, P.sel, r, c, P.h)) { P.placed[P.sel] = { r, c, h: P.h }; P.sel = nextUnplaced(); Sound.tone(300, 500, .08, .12, 'triangle'); }
+    else { Sound.err(); shake(P.board.board); }
     renderPlace();
   }
   function rotate() { if (P.locked) return; P.h = !P.h; Sound.click(); renderPlace(); }
   $('btnRotate').onclick = rotate;
   $('btnRandom').onclick = () => { if (P.locked) return; P.placed = randomFleet(); P.sel = null; Sound.click(); renderPlace(); };
   $('btnClear').onclick = () => { if (P.locked) return; P.placed = {}; P.sel = 'carrier'; renderPlace(); };
-  document.addEventListener('keydown', e => {
-    if (e.target.tagName === 'INPUT') return;
-    if ((e.key === 'r' || e.key === 'R') && S.screen === 'scrPlace') rotate();
-    if (S.screen === 'scrBattle' && B && B.arm) {
-      if (e.key === 'Escape') { B.arm = null; previewArm(null); renderPowerBar(); }
-      if ((e.key === 'r' || e.key === 'R') && B.arm === 'artillery') { B.armH = !B.armH; previewArm(B.lastHover && B.lastHover[0], B.lastHover && B.lastHover[1]); }
-    }
-  });
   $('btnReady').onclick = () => {
     if (Object.keys(P.placed).length < FLEET.length) return;
-    if (S.powerups && !P.power) { toast('Bitte zuerst ein Power-up wählen.'); return; }
+    if (S.nPowers && P.powers.length !== S.nPowers) { toast(`Bitte ${S.nPowers === 2 ? '2 Power-ups' : 'ein Power-up'} wählen.`); return; }
     P.locked = true; P.sel = null; P.hover = null; renderPlace(); Sound.click();
-    if (S.mode === 'cpu') return startCpuBattle();
-    socket.emit('ready', { ships: FLEET.map(f => ({ key: f.key, ...P.placed[f.key] })), power: P.power });
+    socket.emit('ready', { ships: FLEET.map(f => ({ key: f.key, ...P.placed[f.key] })), powers: P.powers });
     showWait();
   };
   function showWait() {
     const w = $('waitMsg'); w.classList.remove('hidden');
-    w.querySelector('span').textContent = S.oppReady ? `${S.opp.name} ist bereit – gleich geht's los …` : `Warte, bis ${S.opp.name} die Flotte aufgestellt hat …`;
+    const missing = S.seats.filter(s => s.seat !== S.mySeat && !s.ready).map(s => s.name);
+    w.querySelector('span').textContent = missing.length ? `Warte auf ${missing.join(' und ')} …` : 'Alle bereit – gleich geht\'s los …';
   }
+  function openFactionPicker() {
+    if (P.locked) { toast('Nach „Bereit“ kann die Fraktion nicht mehr gewechselt werden.'); return; }
+    modal(`<h2 style="font-size:28px">Fraktion wählen</h2><p>Deine Aufstellung bleibt erhalten.</p><div class="countries modal-countries" id="mCountries"></div><button class="btn ghost" id="mClose">Schließen</button>`, true);
+    countryGrid($('mCountries'), cc => {
+      closeModal();
+      if (cc === S.country) return;
+      S.country = cc; store.set('sv_country', cc); Sound.click();
+      if (S.seats[S.mySeat]) S.seats[S.mySeat].country = cc;
+      socket.emit('setCountry', { country: cc });
+      buildPlaceBoard(); renderPlace(); renderCountries(); renderFleetPreview();
+      toast(`Du kommandierst jetzt: ${COUNTRIES[cc].name}`);
+    });
+    $('mClose').onclick = closeModal;
+  }
+  $('btnFaction').onclick = openFactionPicker;
 
   /* ================= Schlacht ================= */
-  let B = null, myBd = null, enBd = null;
-  const POWERS = {
-    emp: { icon: '⚡', name: 'EMP', desc: 'Das gegnerische Feld ist 5 Züge lang verdeckt – der Gegner schießt blind.', target: false },
-    artillery: { icon: '💥', name: 'Artilleriebeschuss', desc: 'Trifft 3 Felder nebeneinander. Drehen mit R oder Rechtsklick.', target: true },
-    nuke: { icon: '☢️', name: 'Nuke', desc: 'Trifft ein Quadrat von 4×4 Feldern mit einem Schlag.', target: true },
-    radar: { icon: '📡', name: 'Radar', desc: 'Zeigt in einem 2×2-Feld, ob dort ein feindliches Schiff liegt.', target: true },
-  };
-  const EMP_TURNS = 5;
-  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  function areaCells(type, r, c, h) {
-    const out = [];
-    if (type === 'artillery') {
-      if (h) { c = clamp(c, 1, N - 2); for (let i = -1; i <= 1; i++) out.push([r, c + i]); }
-      else { r = clamp(r, 1, N - 2); for (let i = -1; i <= 1; i++) out.push([r + i, c]); }
-    } else if (type === 'nuke') {
-      const r0 = clamp(r - 1, 0, N - 4), c0 = clamp(c - 1, 0, N - 4);
-      for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) out.push([r0 + i, c0 + j]);
-    } else if (type === 'radar') {
-      const r0 = clamp(r, 0, N - 2), c0 = clamp(c, 0, N - 2);
-      for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) out.push([r0 + i, c0 + j]);
-    }
-    return out;
-  }
-  const pubShip = s => ({ key: s.key, r: s.r, c: s.c, h: s.h, len: s.len });
+  let G = null;
+  const opps = () => G ? G.order.map(s => G.opp[s]) : [];
 
-  function buildShips(placed) {
-    return FLEET.map(f => {
-      const p = placed[f.key];
-      return { key: f.key, len: f.len, r: p.r, c: p.c, h: p.h, cells: cellsOf(f.key, p.r, p.c, p.h).map(([a, b]) => K(a, b)), hits: new Set(), sunk: false };
-    });
+  function newGame(myShips) {
+    G = {
+      ships: myShips.map(s => ({ ...s, cells: shipCellsArr(s), hits: new Set((s.hits || []).map(([r, c]) => K(r, c))), sunk: !!s.sunk })),
+      incoming: new Map(), opp: {}, order: S.seats.filter(s => s.seat !== S.mySeat).map(s => s.seat),
+      turn: null, myTurn: false, busy: false, over: false, out: false, log: [], stats: { shots: 0, hits: 0 },
+      powers: [], arm: null, armH: true, blind: 0, drunk: 0, animUntil: 0, lastHover: null,
+    };
+    for (const s of G.order) G.opp[s] = { seat: s, shots: new Map(), known: [], scans: [], bd: null, blind: 0, drunk: 0 };
   }
-  function strike(ships, r, c) {
-    const k = K(r, c), ship = ships.find(s => s.cells.includes(k));
-    if (!ship) return { res: 'miss', ship: null };
-    ship.hits.add(k);
-    if (ship.hits.size === ship.len) { ship.sunk = true; return { res: 'sunk', ship }; }
-    return { res: 'hit', ship };
-  }
-  function newBattle(placed) {
-    B = { myShips: buildShips(placed), incoming: new Map(), outgoing: new Map(), enemySunk: [], myTurn: false, over: false, busy: false,
-      stats: { shots: 0, hits: 0 }, cpu: null, log: [],
-      power: S.powerups ? { type: P.power, used: false } : null, oppPower: S.powerups ? { type: null, used: false } : null,
-      blind: 0, oppBlind: 0, scans: [], arm: null, armH: true, hiddenTruth: new Map(), cpuUnk: new Set(), cpuHiddenSunk: new Set(),
-      cpuTurns: 0, animUntil: 0 };
-  }
-
-  function startCpuBattle() {
-    newBattle(P.placed);
-    const types = Object.keys(POWERS);
-    B.cpu = { ships: buildShips(randomFleet()), power: S.powerups ? types[rand(types.length)] : null, used: false,
-      useAt: 3 + rand(9), queue: [], clear: new Set() };
-    renderBattle();
-    const first = Math.random() < .5;
-    logAdd(first ? 'Münzwurf: Du beginnst!' : `Münzwurf: ${S.opp.name} beginnt.`);
-    setTurn(first);
-  }
-
-  function pegType(v) { return v === 'unknown' ? 'unk' : v === 'miss' ? 'miss' : 'hit'; }
+  function shipCellsArr(s) { return Array.from({ length: s.len }, (_, i) => s.h ? K(s.r, s.c + i) : K(s.r + i, s.c)); }
 
   function renderBattle() {
     show('scrBattle');
-    myBd = makeBoard($('myBoard'), false, !!COUNTRIES[S.country].space);
-    enBd = makeBoard($('enemyBoard'), true, !!COUNTRIES[S.opp.country].space);
-    for (const s of B.myShips) myBd.ships.appendChild(shipEl(S.country, s.key, s.r, s.c, s.h, s.sunk ? 'sunk' : ''));
-    for (const [k, v] of B.incoming) { const [r, c] = k.split(',').map(Number); setPeg(myBd, r, c, pegType(v)); }
-    for (const [k, v] of B.outgoing) { const [r, c] = k.split(',').map(Number); setPeg(enBd, r, c, pegType(v)); }
-    for (const s of B.enemySunk) enBd.ships.appendChild(shipEl(S.opp.country, s.key, s.r, s.c, s.h, 'sunk'));
-    for (const sc of B.scans) drawScan(sc);
-    const L = enBd.cellsL;
-    L.addEventListener('click', e => { const a = enBd.at(e); if (a) fire(a[0], a[1]); });
-    L.addEventListener('mousemove', e => { const a = enBd.at(e); if (a) previewArm(a[0], a[1]); });
-    L.addEventListener('mouseleave', () => previewArm(null));
-    L.addEventListener('contextmenu', e => { if (B && B.arm === 'artillery') { e.preventDefault(); B.armH = !B.armH; previewArm(B.lastHover && B.lastHover[0], B.lastHover && B.lastHover[1]); } });
-    updateEmp(); renderPowerBar(); renderLog(); renderSides();
+    const box = $('battle'); box.innerHTML = '';
+    box.className = 'battle' + (S.msize === 3 ? ' three' : '');
+    const mk = (id, cls) => {
+      const side = el('div', 'side ' + cls); side.id = id;
+      side.append(el('div', 'plate'), el('div', 'bwrap'), el('div', 'fleet-list'));
+      box.appendChild(side); return side;
+    };
+    const me = mk('side-me', 'me');
+    G.bd = makeBoard(me.querySelector('.bwrap'), false, !!COUNTRIES[S.country].space);
+    for (const s of G.order) {
+      const side = mk('side-' + s, 'opp');
+      const O = G.opp[s];
+      O.side = side;
+      O.bd = makeBoard(side.querySelector('.bwrap'), true, !!COUNTRIES[S.seats[s].country].space);
+      const L = O.bd.cellsL;
+      L.addEventListener('click', e => { const a = O.bd.at(e); if (a) onBoardClick(s, a[0], a[1]); });
+      L.addEventListener('mousemove', e => { const a = O.bd.at(e); if (a) previewArm(s, a[0], a[1]); });
+      L.addEventListener('mouseleave', () => previewArm(s, null));
+      L.addEventListener('contextmenu', e => { if (G.arm && G.arm.type === 'artillery') { e.preventDefault(); G.armH = !G.armH; refreshPreview(); } });
+    }
+    drawMyBoard();
+    for (const s of G.order) drawOppBoard(s);
+    renderAll();
   }
+  function drawMyBoard() {
+    G.bd.ships.innerHTML = '';
+    for (const s of G.ships) G.bd.ships.appendChild(shipEl(s.cc, s.key, s.r, s.c, s.h, s.sunk ? 'sunk' : '', s.id));
+    for (const [k, v] of G.incoming) { const [r, c] = k.split(',').map(Number); setPeg(G.bd, r, c, v === 'miss' ? 'miss' : 'hit'); }
+    for (const s of G.ships) for (const k of s.hits) { const [r, c] = k.split(',').map(Number); setPeg(G.bd, r, c, 'hit'); }
+  }
+  function drawOppBoard(s) {
+    const O = G.opp[s];
+    for (const [k, v] of O.shots) { const [r, c] = k.split(',').map(Number); setPeg(O.bd, r, c, pegType(v)); }
+    for (const sh of O.known) O.bd.ships.appendChild(shipEl(sh.cc, sh.key, sh.r, sh.c, sh.h, 'sunk', sh.id));
+    for (const sc of O.scans) drawScan(O, sc);
+  }
+  function renderAll() { updateEmp(); renderPowerBar(); renderSides(); renderLog(); setTurnUI(); }
 
   function renderSides() {
-    const myLeft = B.myShips.filter(s => !s.sunk).length, enLeft = FLEET.length - B.enemySunk.length;
-    const badge = n => n > 0 ? ` <span class="emp-badge">⚡ blind (${n})</span>` : '';
-    $('plateMe').innerHTML = `${flagSVG(S.country)}<div class="p-name">${esc(S.name)}${badge(B.blind)}<small>Deine Flotte · ${COUNTRIES[S.country].navy}</small></div><div class="p-count"><b>${myLeft}</b>/5<br>Schiffe</div>`;
-    $('plateEnemy').innerHTML = `${flagSVG(S.opp.country)}<div class="p-name">${esc(S.opp.name)}${S.oppOnline ? '' : ' <span class="off">● offline</span>'}${badge(B.oppBlind)}<small>Feindgebiet · ${COUNTRIES[S.opp.country].navy}</small></div><div class="p-count"><b>${enLeft}</b>/5<br>Schiffe</div>`;
-    const list = (cc, isSunk) => FLEET.map(f => {
-      const s = shipInfo(cc, f.key);
-      return `<div class="fl-item${isSunk(f.key) ? ' sunk' : ''}"><div class="fl-img">${shipSVG(cc, f.key, true)}</div><span>${esc(s.name)}</span></div>`;
-    }).join('');
-    $('myFleet').innerHTML = list(S.country, k => B.myShips.find(s => s.key === k).sunk);
-    $('enemyFleet').innerHTML = list(S.opp.country, k => B.enemySunk.some(s => s.key === k));
+    if (!G) return;
+    const badges = (blind, drunk, seat) => (blind > 0 ? ` <span class="emp-badge">⚡ blind (${blind})</span>` : '') + (drunk > 0 ? ` <span class="drunk-badge">🚽 ${drunk}</span>` : '') +
+      (S.seats[seat] && S.seats[seat].online === false ? ' <span class="off">● offline</span>' : '') + (S.seats[seat] && S.seats[seat].bot ? ' <i class="bot">BOT</i>' : '');
+    const meSide = $('side-me');
+    const myLeft = G.ships.filter(s => !s.sunk).length;
+    meSide.querySelector('.plate').innerHTML = `${flagSVG(S.country)}<div class="p-name">${esc(S.name)}${badges(G.blind, G.drunk, S.mySeat)}<small>Deine Flotte · ${COUNTRIES[S.country].navy}</small></div><div class="p-count"><b>${myLeft}</b>/${G.ships.length}<br>Schiffe</div>`;
+    meSide.querySelector('.plate').classList.toggle('active', G.turn === S.mySeat && !G.over);
+    meSide.classList.toggle('out', G.out);
+    meSide.querySelector('.fleet-list').innerHTML = G.ships.map(s => `<div class="fl-item${s.sunk ? ' sunk' : ''}"><div class="fl-img">${shipSVG(s.cc, s.key, true)}</div><span>${esc(shipName(s))}</span></div>`).join('');
+    for (const s of G.order) {
+      const O = G.opp[s], st = S.seats[s];
+      const total = st.ships, left = Math.max(0, total - O.known.length);
+      O.side.querySelector('.plate').innerHTML = `${flagSVG(st.country)}<div class="p-name">${esc(st.name)}${badges(O.blind, O.drunk, s)}<small>${st.out ? (st.place ? `ausgeschieden · Platz ${st.place}` : 'ausgeschieden') : 'Feindgebiet · ' + COUNTRIES[st.country].navy}${st.used && st.used.length ? ' · ' + st.used.map(t => POWERS[t].icon).join('') : ''}</small></div><div class="p-count"><b>${st.out ? 0 : left}</b>/${total}<br>Schiffe</div>`;
+      O.side.querySelector('.plate').classList.toggle('active', G.turn === s && !G.over);
+      O.side.classList.toggle('out', !!st.out);
+      O.side.querySelector('.fleet-list').innerHTML = (O.known.length ? O.known.map(sh => `<div class="fl-item sunk"><div class="fl-img">${shipSVG(sh.cc, sh.key, true)}</div><span>${esc(shipName(sh))}</span></div>`).join('') : '') +
+        `<div class="fl-note">${O.known.length ? '' : 'Noch kein Schiff versenkt · '}${left} ${left === 1 ? 'Schiff' : 'Schiffe'} übrig</div>`;
+    }
+  }
+
+  function setTurnUI() {
+    if (!G) return;
+    const mine = G.turn === S.mySeat && !G.over && !G.out;
+    G.myTurn = mine;
+    for (const s of G.order) G.opp[s].bd.host.classList.toggle('locked', !mine || G.busy || S.seats[s].out);
+    const st = $('status');
+    if (G.over) return;
+    st.className = 'status ' + (mine ? 'mine' : 'theirs');
+    let txt;
+    if (G.out) txt = `👀 Du bist ausgeschieden – ${seatName(G.turn)} ist am Zug.`;
+    else if (mine) {
+      txt = G.again ? '🔥 Treffer! Du darfst nochmal schießen!' : (S.msize === 3 ? '🎯 Du bist am Zug – schieß auf einen deiner Gegner!' : '🎯 Du bist am Zug – wähle ein Ziel im Feindgebiet!');
+      if (G.blind > 0) txt = `⚡ Du schießt blind! (EMP – noch ${G.blind} ${G.blind === 1 ? 'Zug' : 'Züge'})`;
+      if (G.drunk > 0) txt += ` · 🚽 Aushilfsschütze: dein Schuss geht daneben (noch ${G.drunk})`;
+    } else txt = G.again ? `🔥 ${seatName(G.turn)} hat getroffen und schießt nochmal …` : `⏳ ${seatName(G.turn)} ist am Zug …`;
+    st.textContent = txt;
+    $('side-me').style.opacity = mine || G.out ? .8 : 1;
+    renderPowerBar(); renderSides();
   }
 
   function updateEmp() {
-    if (!enBd) return;
-    enBd.board.classList.toggle('emp', B.blind > 0);
-    let lab = enBd.fx.querySelector('.emp-label');
-    if (B.blind > 0) {
-      if (!lab) { lab = el('div', 'emp-label'); enBd.fx.appendChild(lab); }
-      lab.innerHTML = `⚡ EMP – Sensoren gestört<br><small>noch ${B.blind} ${B.blind === 1 ? 'Zug' : 'Züge'} blind</small>`;
-    } else if (lab) lab.remove();
-    renderSides();
-  }
-
-  function renderPowerBar() {
-    const bar = $('powerBar');
-    if (!B.power) { bar.classList.add('hidden'); return; }
-    bar.classList.remove('hidden');
-    const P0 = POWERS[B.power.type], used = B.power.used, armed = !!B.arm;
-    const op = B.oppPower;
-    bar.innerHTML = `<div class="pw-me${used ? ' used' : ''}${armed ? ' armed' : ''}"><span class="pw-ic">${P0.icon}</span>
-      <div class="pw-txt"><b>${P0.name}</b><small>${used ? 'Eingesetzt' : armed ? 'Ziel im Feindgebiet wählen …' + (B.arm === 'artillery' ? ' (R dreht)' : '') : P0.desc}</small></div>
-      ${used ? '' : armed ? `${B.arm === 'artillery' ? '<button class="btn small" id="pwRot">↻ Drehen</button>' : ''}<button class="btn ghost small" id="pwCancel">Abbrechen</button>` : '<button class="btn primary small" id="pwUse">Einsetzen</button>'}</div>
-      <div class="pw-opp">Gegner: ${op.used && op.type ? `${POWERS[op.type].icon} ${POWERS[op.type].name} <small>(eingesetzt)</small>` : '❓ <small>unbekanntes Power-up</small>'}</div>`;
-    const u = $('pwUse'); if (u) u.onclick = armPower;
-    const c = $('pwCancel'); if (c) c.onclick = () => { B.arm = null; previewArm(null); renderPowerBar(); };
-    const rt = $('pwRot'); if (rt) rt.onclick = () => { B.armH = !B.armH; previewArm(B.lastHover && B.lastHover[0], B.lastHover && B.lastHover[1]); };
-  }
-  function armPower() {
-    if (!B || B.over || !B.myTurn || B.busy || B.power.used) { Sound.err(); toast('Du kannst das Power-up nur einsetzen, wenn du am Zug bist.'); return; }
-    Sound.click();
-    if (!POWERS[B.power.type].target) return firePower(0, 0);
-    B.arm = B.power.type; B.armH = true; renderPowerBar();
-    toast('Wähle das Zielgebiet im Feindgebiet.');
-  }
-  function previewArm(r, c) {
-    if (!enBd) return;
-    enBd.cells.forEach(x => x.classList.remove('pv-arm'));
-    if (r == null || !B || !B.arm || !B.myTurn) { if (r != null) B.lastHover = [r, c]; return; }
-    B.lastHover = [r, c];
-    for (const [a, b] of areaCells(B.arm, r, c, B.armH)) enBd.cell(a, b).classList.add('pv-arm');
-  }
-
-  function setTurn(mine, again = false) {
-    if (!B || B.over) return;
-    B.myTurn = mine; B.busy = false;
-    enBd.host.classList.toggle('locked', !mine || B.over);
-    $('sideMe').style.opacity = mine ? .78 : 1;
-    $('sideEnemy').style.opacity = mine ? 1 : .78;
-    const st = $('status');
-    st.className = 'status ' + (mine ? 'mine' : 'theirs');
-    let txt = mine ? (again ? '🔥 Treffer! Du darfst nochmal schießen!' : '🎯 Du bist am Zug – wähle ein Ziel im Feindgebiet!')
-      : (again ? `🔥 ${S.opp.name} hat getroffen und schießt nochmal …` : `⏳ ${S.opp.name} zielt …`);
-    if (mine && B.blind > 0) txt = `⚡ Du schießt blind! (EMP – noch ${B.blind} ${B.blind === 1 ? 'Zug' : 'Züge'})`;
-    st.textContent = txt;
-    if (mine && !again) Sound.ping();
-    renderPowerBar();
-    if (!mine && S.mode === 'cpu') setTimeout(cpuMove, (B.lastSunk ? 2200 : 750) + Math.random() * 700);
-    B.lastSunk = false;
-  }
-
-  /* ----- eigene Schüsse ----- */
-  function fire(r, c) {
-    if (!B || B.over || !B.myTurn || B.busy) return;
-    if (B.arm) return firePower(r, c);
-    if (B.outgoing.has(K(r, c))) { Sound.err(); return; }
-    B.busy = true; enBd.host.classList.add('locked');
-    Sound.shot();
-    if (S.mode === 'cpu') {
-      const blind = B.blind > 0;
-      const { res, ship } = strike(B.cpu.ships, r, c);
-      setTimeout(() => {
-        if (blind) { B.hiddenTruth.set(K(r, c), res); onResult(r, c, 'unknown', null); }
-        else onResult(r, c, res, ship ? pubShip(ship) : null);
-        afterMyLocal(!blind && res !== 'miss', blind);
-      }, 380);
-    } else {
-      socket.emit('shoot', { r, c });
-      B.shotTimer = setTimeout(() => { if (B && B.busy) { B.busy = false; enBd.host.classList.remove('locked'); toast('Keine Antwort vom Server – nochmal versuchen.'); } }, 8000);
+    if (!G) return;
+    for (const s of G.order) {
+      const O = G.opp[s];
+      O.bd.board.classList.toggle('emp', G.blind > 0);
+      let lab = O.bd.fx.querySelector('.emp-label');
+      if (G.blind > 0) {
+        if (!lab) { lab = el('div', 'emp-label'); O.bd.fx.appendChild(lab); }
+        lab.innerHTML = `⚡ EMP – Sensoren gestört<br><small>noch ${G.blind} ${G.blind === 1 ? 'Zug' : 'Züge'} blind</small>`;
+      } else if (lab) lab.remove();
     }
-  }
-  function afterMyLocal(keep, wasBlind) {
-    if (wasBlind) { B.blind--; if (B.blind === 0) revealLocal(); updateEmp(); }
-    if (B.cpu.ships.every(s => s.sunk)) return setTimeout(() => endGame(true, B.cpu.ships), Math.max(0, B.animUntil - Date.now()));
-    setTurn(keep, keep);
-  }
-  function revealLocal() {
-    revealBlind([...B.hiddenTruth].map(([k, v]) => [...k.split(',').map(Number), v]), B.cpu.ships.filter(s => s.sunk).map(pubShip));
-    B.hiddenTruth.clear();
-  }
-  function revealBlind(list, sunk) {
-    for (const [r, c, v] of list) {
-      if (B.outgoing.get(K(r, c)) !== 'unknown') continue;
-      B.outgoing.set(K(r, c), v); if (v !== 'miss') B.stats.hits++;
-      setPeg(enBd, r, c, pegType(v), v !== 'miss');
-    }
-    for (const s of sunk || []) if (!B.enemySunk.some(x => x.key === s.key)) {
-      B.enemySunk.push(s); enBd.ships.appendChild(shipEl(S.opp.country, s.key, s.r, s.c, s.h, 'sunk sunk-enemy'));
-      logAdd(`Aufklärung: ${shipInfo(S.opp.country, s.key).name} wurde während des EMP versenkt!`, 'l-sunk');
-    }
-    B.blind = 0;
-    if (list.length) { logAdd('⚡ EMP vorbei – deine Sensoren sind wieder online.'); toast('⚡ Sensoren wieder online – Ergebnisse aufgedeckt!'); }
-    updateEmp();
-  }
-
-  function onResult(r, c, res, ship, quiet = false) {
-    clearTimeout(B.shotTimer);
-    B.outgoing.set(K(r, c), res); B.stats.shots++;
-    if (res === 'unknown') {
-      setPeg(enBd, r, c, 'unk', true);
-      if (!quiet) { Sound.tone(300, 120, .2, .1, 'sawtooth'); logAdd(`Du: ${coord(r, c)} – Ergebnis unbekannt (EMP).`); }
-      return;
-    }
-    if (res !== 'miss') B.stats.hits++;
-    setPeg(enBd, r, c, res === 'miss' ? 'miss' : 'hit', true);
-    if (res === 'miss') { if (!quiet) { Sound.splash(); logAdd(`Du: ${coord(r, c)} – daneben.`); } }
-    else if (res === 'hit') { if (!quiet) { Sound.boom(); shake(enBd.board); } logAdd(`Du: ${coord(r, c)} – Treffer!`, 'l-hit'); }
-    else {
-      B.enemySunk.push(ship); B.lastSunk = true;
-      const se = shipEl(S.opp.country, ship.key, ship.r, ship.c, ship.h, 'sunk sunk-enemy');
-      setTimeout(() => enBd.ships.appendChild(se), 450);
-      megaBoom(enBd, ship);
-      logAdd(`Du: ${coord(r, c)} – Versenkt! ${shipInfo(S.opp.country, ship.key).name} geht unter.`, 'l-sunk');
-      toast(`💥 ${shipInfo(S.opp.country, ship.key).name} versenkt!`);
-    }
-    renderSides();
-  }
-
-  function onIncoming(r, c, quiet = false) {
-    const { res, ship } = strike(B.myShips, r, c);
-    B.incoming.set(K(r, c), res);
-    setPeg(myBd, r, c, res === 'miss' ? 'miss' : 'hit', true);
-    if (res === 'miss') { if (!quiet) { Sound.splash(); logAdd(`${S.opp.name}: ${coord(r, c)} – daneben.`); } }
-    else if (res === 'hit') { if (!quiet) { Sound.boom(); shake(myBd.board); } logAdd(`${S.opp.name}: ${coord(r, c)} – Treffer auf ${shipInfo(S.country, ship.key).name}!`, 'l-hit'); }
-    else {
-      B.lastSunk = true;
-      const se = myBd.ships.querySelector(`[data-key="${ship.key}"]`); if (se) setTimeout(() => se.classList.add('sunk'), 450);
-      megaBoom(myBd, ship);
-      logAdd(`${S.opp.name}: ${coord(r, c)} – ${shipInfo(S.country, ship.key).name} wurde versenkt!`, 'l-sunk');
-    }
-    renderSides();
-    return { res, ship };
   }
 
   /* ----- Power-ups ----- */
-  function firePower(r, c) {
-    const type = B.power.type, h = B.armH;
-    B.arm = null; previewArm(null);
-    B.busy = true; B.power.used = true; enBd.host.classList.add('locked'); renderPowerBar();
-    if (S.mode !== 'cpu') { socket.emit('power', { type, r, c, h }); return; }
-    const blind = B.blind > 0;
-    if (type === 'emp') {
-      B.oppBlind = EMP_TURNS;
-      return myPowerFx({ type }, () => afterMyLocal(false, blind));
-    }
-    const cells = areaCells(type, r, c, h);
-    if (type === 'radar') {
-      const contact = B.cpu.ships.some(s => cells.some(([a, b]) => s.cells.includes(K(a, b))));
-      return myPowerFx({ type, scan: { r: cells[0][0], c: cells[0][1], contact } }, () => afterMyLocal(false, blind));
-    }
-    const shots = cells.filter(([a, b]) => !B.outgoing.has(K(a, b))).map(([a, b]) => {
-      const { res, ship } = strike(B.cpu.ships, a, b);
-      if (blind) { B.hiddenTruth.set(K(a, b), res); return { r: a, c: b, res: 'unknown', ship: null }; }
-      return { r: a, c: b, res, ship: res === 'sunk' ? pubShip(ship) : null };
-    });
-    const anyHit = shots.some(x => x.res === 'hit' || x.res === 'sunk');
-    myPowerFx({ type, cells, shots }, () => afterMyLocal(!blind && anyHit, blind));
+  function renderPowerBar() {
+    const bar = $('powerBar');
+    if (!G || !S.powerups || !G.powers.length) { bar.classList.add('hidden'); return; }
+    bar.classList.remove('hidden');
+    const can = G.myTurn && !G.busy && !G.over;
+    bar.innerHTML = G.powers.map((p, i) => {
+      const def = POWERS[p.type], armed = G.arm && G.arm.idx === i;
+      return `<div class="pw-me${p.uses <= 0 ? ' used' : ''}${armed ? ' armed' : ''}"><span class="pw-ic">${def.icon}</span>
+        <div class="pw-txt"><b>${def.name}${(p.max || 1) > 1 ? ` <small class="uses">${p.uses}/${p.max}</small>` : ''}</b><small>${p.uses <= 0 ? 'Eingesetzt' : armed ? (def.target ? 'Ziel auf einem Feindfeld wählen …' : 'Gegner anklicken, der geblendet werden soll …') + (p.type === 'artillery' ? ' (R dreht)' : '') : def.desc}</small></div>
+        ${p.uses <= 0 ? '' : armed ? `${p.type === 'artillery' ? '<button class="btn small" data-rot="1">↻</button>' : ''}<button class="btn ghost small" data-cancel="1">Abbrechen</button>` : `<button class="btn primary small" data-use="${i}" ${can ? '' : 'disabled'}>Einsetzen</button>`}</div>`;
+    }).join('');
+    bar.querySelectorAll('[data-use]').forEach(b => b.onclick = () => armPower(+b.dataset.use));
+    bar.querySelectorAll('[data-cancel]').forEach(b => b.onclick = () => { G.arm = null; clearPreview(); renderPowerBar(); });
+    bar.querySelectorAll('[data-rot]').forEach(b => b.onclick = () => { G.armH = !G.armH; refreshPreview(); });
+  }
+  function armPower(i) {
+    const p = G.powers[i];
+    if (!G.myTurn || G.busy || G.over || !p || p.uses <= 0) { Sound.err(); return; }
+    Sound.click();
+    const alive = G.order.filter(s => !S.seats[s].out);
+    if (!POWERS[p.type].target && alive.length === 1) return firePower(p.type, alive[0], 0, 0, true);
+    G.arm = { idx: i, type: p.type }; G.armH = true; renderPowerBar();
+    toast(POWERS[p.type].target ? 'Wähle das Zielgebiet auf einem Feindfeld.' : 'Klicke auf das Feld des Gegners, der geblendet werden soll.');
+  }
+  function areaCells(type, r, c, h) {
+    const cl = (v, a, b) => Math.max(a, Math.min(b, v)), out = [];
+    if (type === 'artillery') { if (h) { c = cl(c, 1, N - 2); for (let i = -1; i <= 1; i++) out.push([r, c + i]); } else { r = cl(r, 1, N - 2); for (let i = -1; i <= 1; i++) out.push([r + i, c]); } }
+    else if (type === 'nuke') { const r0 = cl(r - 1, 0, N - 4), c0 = cl(c - 1, 0, N - 4); for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) out.push([r0 + i, c0 + j]); }
+    else if (type === 'radar') { const r0 = cl(r, 0, N - 2), c0 = cl(c, 0, N - 2); for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) out.push([r0 + i, c0 + j]); }
+    else if (type === 'emp') { for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) out.push([i, j]); }
+    return out;
+  }
+  function clearPreview() { for (const s of G.order) G.opp[s].bd.cells.forEach(x => x.classList.remove('pv-arm')); }
+  function previewArm(s, r, c) {
+    if (!G) return;
+    clearPreview();
+    if (r == null) { G.lastHover = null; return; }
+    G.lastHover = [s, r, c];
+    if (!G.arm || !G.myTurn || S.seats[s].out) return;
+    for (const [a, b] of areaCells(G.arm.type, r, c, G.armH)) G.opp[s].bd.cell(a, b).classList.add('pv-arm');
+  }
+  function refreshPreview() { if (G.lastHover) previewArm(...G.lastHover); }
+  function onBoardClick(s, r, c) {
+    if (!G || G.over || !G.myTurn || G.busy || S.seats[s].out) return;
+    if (G.arm) return firePower(G.arm.type, s, r, c, G.armH);
+    if (G.opp[s].shots.has(K(r, c))) { Sound.err(); return; }
+    G.busy = true; setTurnUI(); Sound.shot();
+    socket.emit('shoot', { target: s, r, c });
+    armTimeout();
+  }
+  function firePower(type, s, r, c, h) {
+    G.arm = null; clearPreview();
+    G.busy = true; setTurnUI();
+    socket.emit('power', { type, target: s, r, c, h });
+    armTimeout();
+  }
+  function armTimeout() {
+    clearTimeout(G.busyT);
+    G.busyT = setTimeout(() => { if (G && G.busy) { G.busy = false; setTurnUI(); toast('Keine Antwort vom Server – nochmal versuchen.'); } }, 9000);
   }
 
-  function myPowerFx(m, then) {
-    const P0 = POWERS[m.type];
-    logAdd(`Du setzt ${P0.icon} ${P0.name} ein!`, 'l-sunk');
-    let wait = 900;
-    if (m.type === 'emp') {
-      fxEmp(enBd); Sound.emp();
-      logAdd(`${S.opp.name} ist ${EMP_TURNS} Züge lang blind!`);
+  /* ----- Nachrichten-Warteschlange (für saubere Animationen) ----- */
+  let Q = Promise.resolve();
+  function enqueue(fn) { Q = Q.then(async () => { try { const ms = await fn(); if (ms) await sleep(ms); } catch (e) { console.error(e); } }); }
+
+  function logAdd(t, cls = '') { if (!G) return; G.log.unshift({ t, cls }); G.log.length = Math.min(G.log.length, 40); renderLog(); }
+  function renderLog() { if (G) $('log').innerHTML = G.log.slice(0, 5).map(l => `<div class="${l.cls}">${esc(l.t)}</div>`).join(''); }
+
+  function myShipById(id) { return G.ships.find(s => s.id === id); }
+
+  function onShot(m) {
+    const by = m.by, t = m.target;
+    if (G.opp[by] && G.opp[by].drunk > 0) G.opp[by].drunk--;
+    if (G.opp[by] && G.opp[by].blind > 0) G.opp[by].blind--;
+    if (by === S.mySeat) {
+      clearTimeout(G.busyT);
+      const O = G.opp[t];
+      G.drunk = m.drunkLeft || 0;
+      if (G.blind > 0) G.blind--;
+      O.shots.set(K(m.r, m.c), m.res); G.stats.shots++;
+      if (m.aimed) driftFx(O.bd, m.aimed, [m.r, m.c]);
+      if (m.res === 'unknown') { setPeg(O.bd, m.r, m.c, 'unk', true); Sound.tone(300, 120, .2, .1, 'sawtooth'); logAdd(`Du → ${seatName(t)}: ${coord(m.r, m.c)} – Ergebnis unbekannt (EMP).`); updateEmp(); return 500; }
+      if (m.res !== 'miss') G.stats.hits++;
+      setPeg(O.bd, m.r, m.c, m.res === 'miss' ? 'miss' : 'hit', true);
+      const pre = `Du${S.msize === 3 ? ' → ' + seatName(t) : ''}: ${coord(m.r, m.c)}${m.aimed ? ' (verzogen!)' : ''}`;
+      if (m.res === 'miss') { Sound.splash(); logAdd(`${pre} – daneben.`); updateEmp(); renderSides(); return 450; }
+      if (m.res === 'hit') { Sound.boom(); shake(O.bd.board); logAdd(`${pre} – Treffer!`, 'l-hit'); updateEmp(); renderSides(); return 500; }
+      O.known.push(m.ship);
+      const se = shipEl(m.ship.cc, m.ship.key, m.ship.r, m.ship.c, m.ship.h, 'sunk sunk-enemy', m.ship.id);
+      setTimeout(() => O.bd.ships.appendChild(se), 450);
+      megaBoom(O.bd, m.ship);
+      logAdd(`${pre} – Versenkt! ${shipName(m.ship)} geht unter.`, 'l-sunk');
+      toast(`💥 ${shipName(m.ship)} versenkt!`);
+      updateEmp(); renderSides();
+      return 2400;
+    }
+    if (t === S.mySeat) {
+      const name = seatName(by);
+      if (m.aimed) driftFx(G.bd, m.aimed, [m.r, m.c]);
+      const ship = m.shipId ? myShipById(m.shipId) : null;
+      G.incoming.set(K(m.r, m.c), m.res);
+      setPeg(G.bd, m.r, m.c, m.res === 'miss' ? 'miss' : 'hit', true);
+      if (ship) { ship.hits.add(K(m.r, m.c)); if (m.res === 'sunk') ship.sunk = true; }
+      if (m.res === 'miss') { Sound.splash(); logAdd(`${name}: ${coord(m.r, m.c)} – daneben.`); renderSides(); return 450; }
+      if (m.res === 'hit') { Sound.boom(); shake(G.bd.board); logAdd(`${name}: ${coord(m.r, m.c)} – Treffer auf ${shipName(ship)}!`, 'l-hit'); renderSides(); return 500; }
+      const se = G.bd.ships.querySelector(`[data-id="${ship.id}"]`); if (se) setTimeout(() => se.classList.add('sunk'), 450);
+      megaBoom(G.bd, ship);
+      logAdd(`${name}: ${coord(m.r, m.c)} – ${shipName(ship)} wurde versenkt!`, 'l-sunk');
       renderSides();
-    } else if (m.type === 'radar') {
-      fxRadar(enBd, m.scan); Sound.radar(); wait = 1500;
-      setTimeout(() => {
-        B.scans.push(m.scan); drawScan(m.scan);
-        logAdd(m.scan.contact ? `📡 Radar ${coord(m.scan.r, m.scan.c)}: KONTAKT – dort liegt ein Schiff!` : `📡 Radar ${coord(m.scan.r, m.scan.c)}: Gebiet ist frei.`, m.scan.contact ? 'l-hit' : '');
-        if (m.scan.contact) Sound.tone(880, 880, .25, .15, 'square');
-      }, 1200);
-    } else {
-      wait = applyBarrage(m, enBd, sh => onResult(sh.r, sh.c, sh.res, sh.ship, true));
+      return 2400;
     }
-    B.animUntil = Date.now() + wait;
-    setTimeout(then, wait);
+    // Dritter Spieler
+    if (m.sunk) { logAdd(`${seatName(by)} versenkt ein Schiff von ${seatName(t)}!`, 'l-sunk'); toast(`💥 ${seatName(by)} versenkt ein Schiff von ${seatName(t)}!`); }
+    else logAdd(`${seatName(by)} schießt auf ${seatName(t)}.`);
+    return 200;
   }
 
-  function applyBarrage(m, bd, apply) {
-    const anySunk = (m.shots || []).some(x => x.res === 'sunk' || x.key && x.res === 'sunk');
+  function onPower(m) {
+    const by = m.by, t = m.target, def = POWERS[m.type];
+    if (S.seats[by]) S.seats[by].used = [...(S.seats[by].used || []), m.type];
+    if (G.opp[by] && G.opp[by].blind > 0) G.opp[by].blind--;
+    if (by === S.mySeat) {
+      clearTimeout(G.busyT);
+      const pw = G.powers.find(p => p.type === m.type && p.uses > 0); if (pw) pw.uses--;
+      if (G.blind > 0) G.blind--;
+      const O = G.opp[t];
+      logAdd(`Du setzt ${def.icon} ${def.name}${S.msize === 3 ? ' gegen ' + seatName(t) : ''} ein!`, 'l-sunk');
+      renderPowerBar();
+      if (m.type === 'emp') { O.blind = m.blind; fxEmp(O.bd); Sound.emp(); logAdd(`${seatName(t)} ist ${m.blind} Züge lang blind!`); renderSides(); return 1300; }
+      if (m.type === 'radar') {
+        fxRadar(O.bd, m.scan); Sound.radar();
+        setTimeout(() => {
+          O.scans.push(m.scan); drawScan(O, m.scan);
+          logAdd(m.scan.contact ? `📡 Radar ${coord(m.scan.r, m.scan.c)}: KONTAKT – dort liegt ein Schiff!` : `📡 Radar ${coord(m.scan.r, m.scan.c)}: Gebiet ist frei.`, m.scan.contact ? 'l-hit' : '');
+          if (m.scan.contact) Sound.tone(880, 880, .25, .15, 'square');
+        }, 1200);
+        return 1600;
+      }
+      return barrage(m, O.bd, sh => {
+        O.shots.set(K(sh.r, sh.c), sh.res); G.stats.shots++;
+        if (sh.res === 'unknown') return setPeg(O.bd, sh.r, sh.c, 'unk', true);
+        if (sh.res !== 'miss') G.stats.hits++;
+        setPeg(O.bd, sh.r, sh.c, sh.res === 'miss' ? 'miss' : 'hit', true);
+        if (sh.res === 'hit') logAdd(`Du: ${coord(sh.r, sh.c)} – Treffer!`, 'l-hit');
+        if (sh.res === 'sunk') {
+          O.known.push(sh.ship);
+          setTimeout(() => O.bd.ships.appendChild(shipEl(sh.ship.cc, sh.ship.key, sh.ship.r, sh.ship.c, sh.ship.h, 'sunk sunk-enemy', sh.ship.id)), 450);
+          megaBoom(O.bd, sh.ship); logAdd(`Versenkt! ${shipName(sh.ship)} geht unter.`, 'l-sunk');
+        }
+        renderSides();
+      });
+    }
+    if (t === S.mySeat) {
+      toast(`${def.icon} ${seatName(by)} setzt ${def.name} gegen dich ein!`);
+      logAdd(`${seatName(by)} setzt ${def.icon} ${def.name} gegen dich ein!`, 'l-sunk');
+      if (m.type === 'emp') { G.blind = m.blind; for (const s of G.order) fxEmp(G.opp[s].bd); Sound.emp(); updateEmp(); renderSides(); logAdd(`Deine Sensoren sind ${m.blind} Züge lang gestört!`, 'l-hit'); return 1400; }
+      if (m.type === 'radar') { fxRadar(G.bd, m.scan); Sound.radar(); logAdd(`${seatName(by)} durchsucht ${coord(m.scan.r, m.scan.c)} mit Radar.`); return 1600; }
+      return barrage(m, G.bd, sh => {
+        const ship = sh.shipId ? myShipById(sh.shipId) : null;
+        G.incoming.set(K(sh.r, sh.c), sh.res);
+        setPeg(G.bd, sh.r, sh.c, sh.res === 'miss' ? 'miss' : 'hit', true);
+        if (ship) { ship.hits.add(K(sh.r, sh.c)); if (sh.res === 'sunk') { ship.sunk = true; const se = G.bd.ships.querySelector(`[data-id="${ship.id}"]`); if (se) setTimeout(() => se.classList.add('sunk'), 450); megaBoom(G.bd, ship); logAdd(`${shipName(ship)} wurde versenkt!`, 'l-sunk'); } }
+        renderSides();
+      });
+    }
+    if (m.type === 'emp' && G.opp[t]) G.opp[t].blind = m.blind;
+    logAdd(`${seatName(by)} setzt ${def.icon} ${def.name} gegen ${seatName(t)} ein${m.sunk ? ` und versenkt ${m.sunk} Schiff${m.sunk > 1 ? 'e' : ''}!` : '.'}`, m.sunk ? 'l-sunk' : '');
+    toast(`${def.icon} ${seatName(by)} setzt ${def.name} gegen ${seatName(t)} ein!`);
+    renderSides();
+    return 700;
+  }
+
+  function barrage(m, bd, apply) {
+    const shots = m.shots || [];
+    const anySunk = shots.some(x => x.res === 'sunk');
     if (m.type === 'nuke') {
       const [r0, c0] = m.cells[0];
-      nukeFx(bd, r0, c0);
-      setTimeout(() => { (m.shots || []).forEach(apply); }, 650);
-      return 3000 + (anySunk ? 900 : 0);
+      Sound.nuke();
+      const f = el('div', 'screen-flash nuke-flash'); document.body.appendChild(f); setTimeout(() => f.remove(), 1400);
+      boomRect(bd, r0, c0, 4, 4, 'NUKE!', true);
+      setTimeout(() => shots.forEach(apply), 650);
+      return 3200 + (anySunk ? 900 : 0);
     }
-    // Artillerie: drei Einschläge nacheinander
     m.cells.forEach(([r, c], i) => setTimeout(() => { Sound.shot(); setTimeout(() => Sound.boom(), 120); shellFx(bd, r, c); }, i * 280));
-    (m.shots || []).forEach((sh, i) => {
-      const idx = m.cells.findIndex(([a, b]) => a === sh.r && b === sh.c);
-      setTimeout(() => apply(sh), idx * 280 + 200);
-    });
-    return 1200 + (anySunk ? 1800 : 0);
+    shots.forEach(sh => { const i = m.cells.findIndex(([a, b]) => a === sh.r && b === sh.c); setTimeout(() => apply(sh), i * 280 + 200); });
+    return 1300 + (anySunk ? 1900 : 0);
   }
 
-  function oppPowerFx(m, then) {
-    const P0 = POWERS[m.type];
-    if (B.oppPower) { B.oppPower.used = true; B.oppPower.type = m.type; }
-    renderPowerBar();
-    logAdd(`${S.opp.name} setzt ${P0.icon} ${P0.name} ein!`, 'l-sunk');
-    toast(`${P0.icon} ${S.opp.name} setzt ${P0.name} ein!`);
-    let wait = 1000; const results = [];
-    if (m.type === 'emp') {
-      B.blind = m.blind || EMP_TURNS; fxEmp(enBd); Sound.emp(); updateEmp();
-      logAdd(`Deine Sensoren sind ${B.blind} Züge lang gestört – du schießt blind!`, 'l-hit');
-      wait = 1300;
-    } else if (m.type === 'radar') {
-      fxRadar(myBd, m.scan); Sound.radar(); wait = 1500;
-      logAdd(`${S.opp.name} hat das Gebiet ${coord(m.scan.r, m.scan.c)} mit Radar abgesucht.`);
-    } else {
-      wait = applyBarrage(m, myBd, sh => results.push(onIncoming(sh.r, sh.c, true)));
+  /* ----- Zufallsereignisse ----- */
+  function eventBanner(type, txt, affectedMe) {
+    const E = EVENTS[type];
+    const d = el('div', 'event-card ev-' + type + (affectedMe ? ' me' : ''), `<div class="ev-icon">${E.icon}</div><div class="ev-title">${E.title}</div><div class="ev-txt">${esc(txt)}</div>`);
+    $('eventLayer').appendChild(d);
+    setTimeout(() => d.classList.add('out'), 3300);
+    setTimeout(() => d.remove(), 3900);
+    Sound.fanfare();
+  }
+  function boardOf(seat) { return seat === S.mySeat ? G.bd : G.opp[seat] && G.opp[seat].bd; }
+  function onEvent(m) {
+    const E = EVENTS[m.type], me = m.seat === S.mySeat;
+    const who = me ? 'dir' : seatName(m.seat);
+    const whoNom = me ? 'dir' : seatName(m.seat);
+    let txt = m.type === 'pirates' ? E.txt(me ? 'dich' : seatName(m.seat), m.from === S.mySeat ? 'dir' : seatName(m.from)) : E.txt(whoNom);
+    if (me && m.type === 'diarrhea') txt = 'Dein Kapitän muss dringend … ein Aushilfsschütze übernimmt: deine nächsten 3 Schüsse gehen ein Feld daneben!';
+    eventBanner(m.type, txt, me || m.from === S.mySeat);
+    logAdd(`${E.icon} ${E.title} ${txt}`, 'l-event');
+    const bd = boardOf(m.seat);
+    if (m.type === 'iceberg') {
+      Sound.iceberg();
+      if (me) {
+        const ship = myShipById(m.ship.id);
+        icebergFx(bd, m.cells[0]);
+        setTimeout(() => {
+          for (const [r, c] of m.cells) { ship.hits.add(K(r, c)); setPeg(bd, r, c, 'hit', true); }
+          if (m.sunk) { ship.sunk = true; const se = bd.ships.querySelector(`[data-id="${ship.id}"]`); if (se) se.classList.add('sunk'); megaBoom(bd, ship); }
+          shake(bd.board); renderSides();
+        }, 1300);
+      } else if (bd) {
+        icebergFx(bd, m.wreck ? [m.wreck.r, m.wreck.c] : [rand(N), rand(N)]);
+        if (m.wreck) setTimeout(() => revealWreckOn(m.seat, m.wreck), 1300);
+      }
+      return 3800;
     }
-    B.animUntil = Date.now() + wait;
-    setTimeout(() => then(results), wait);
+    if (m.type === 'kraken') {
+      Sound.kraken();
+      const w = m.wreck;
+      if (bd) krakenFx(bd, w);
+      setTimeout(() => {
+        if (me) {
+          const ship = myShipById(w.id);
+          ship.cells.forEach(k => { ship.hits.add(k); const [r, c] = k.split(',').map(Number); setPeg(bd, r, c, 'hit', true); });
+          ship.sunk = true;
+          const se = bd.ships.querySelector(`[data-id="${ship.id}"]`); if (se) se.classList.add('sunk', 'dragged');
+          renderSides();
+        } else if (bd) revealWreckOn(m.seat, w);
+      }, 1600);
+      return 4200;
+    }
+    if (m.type === 'pirates') {
+      Sound.pirates();
+      if (S.seats[m.seat]) S.seats[m.seat].ships++;
+      if (S.seats[m.from]) S.seats[m.from].ships--;
+      if (me) {
+        const s = { ...m.ship, cells: shipCellsArr(m.ship), hits: new Set(), sunk: false };
+        pirateFx(bd, s, true);
+        setTimeout(() => { G.ships.push(s); bd.ships.appendChild(shipEl(s.cc, s.key, s.r, s.c, s.h, 'captured', s.id)); renderSides(); }, 1500);
+        if (G.opp[m.from]) pirateFx(G.opp[m.from].bd, null, false);
+      } else if (m.from === S.mySeat) {
+        const ship = myShipById(m.lostId);
+        pirateFx(G.bd, ship, false);
+        setTimeout(() => { const se = G.bd.ships.querySelector(`[data-id="${m.lostId}"]`); if (se) { se.classList.add('stolen'); setTimeout(() => se.remove(), 1200); } G.ships = G.ships.filter(s => s.id !== m.lostId); renderSides(); }, 900);
+        if (G.opp[m.seat]) pirateFx(G.opp[m.seat].bd, null, true);
+      } else {
+        if (G.opp[m.from]) pirateFx(G.opp[m.from].bd, null, false);
+        if (G.opp[m.seat]) pirateFx(G.opp[m.seat].bd, null, true);
+      }
+      renderSides();
+      return 4000;
+    }
+    if (m.type === 'storm') {
+      Sound.storm();
+      if (bd) stormFx(bd);
+      if (me) {
+        const moved = new Set(m.moved);
+        bd.ships.querySelectorAll('.ship').forEach(e => { if (moved.has(e.dataset.id)) e.classList.add('blown'); });
+        setTimeout(() => {
+          for (const ns of m.ships) { const s = myShipById(ns.id); if (s && moved.has(s.id)) Object.assign(s, { r: ns.r, c: ns.c, h: ns.h, cells: shipCellsArr(ns) }); }
+          bd.ships.innerHTML = '';
+          for (const s of G.ships) bd.ships.appendChild(shipEl(s.cc, s.key, s.r, s.c, s.h, (s.sunk ? 'sunk' : '') + (moved.has(s.id) ? ' landed' : ''), s.id));
+        }, 1500);
+      }
+      return 3800;
+    }
+    if (m.type === 'diarrhea') {
+      Sound.diarrhea();
+      if (me) { G.drunk = m.shots; for (const s of G.order) diarrheaFx(G.opp[s].bd); }
+      else if (G.opp[m.seat]) { G.opp[m.seat].drunk = m.shots; diarrheaFx(G.bd); }
+      renderSides(); setTurnUI();
+      return 3500;
+    }
+    return 3000;
+  }
+  function revealWreckOn(seat, w) {
+    const O = G.opp[seat]; if (!O) return;
+    if (!O.known.some(x => x.id === w.id)) O.known.push(w);
+    const cells = shipCellsArr(w);
+    cells.forEach(k => { if (O.shots.get(k) !== 'miss') O.shots.set(k, 'hit'); const [r, c] = k.split(',').map(Number); setPeg(O.bd, r, c, 'hit', true); });
+    O.bd.ships.appendChild(shipEl(w.cc, w.key, w.r, w.c, w.h, 'sunk sunk-enemy', w.id));
+    renderSides();
   }
 
-  function drawScan(sc) {
-    const d = el('div', 'scan ' + (sc.contact ? 'contact' : 'clear'), `<span>${sc.contact ? 'KONTAKT' : 'FREI'}</span>`);
-    Object.assign(d.style, { left: sc.c * 10 + '%', top: sc.r * 10 + '%', width: '20%', height: '20%' });
-    enBd.ships.appendChild(d);
+  function onEliminated(m) {
+    const st = S.seats[m.seat]; if (st) { st.out = true; st.place = m.place; }
+    if (m.seat === S.mySeat) {
+      G.out = true;
+      if (S.msize === 3 && m.place > 1) {
+        logAdd(`💀 Deine Flotte ist versenkt – Platz ${m.place}.`, 'l-hit');
+        modal(`<h2 class="lose" style="font-size:36px">AUSGESCHIEDEN</h2><p>Deine Flotte liegt am Meeresgrund – <b>Platz ${m.place}</b>${m.forfeit ? ' (aufgegeben)' : ''}. Die anderen kämpfen weiter.</p>
+          <div class="modal-btns"><button class="btn primary" id="mWatch">👀 Weiter zuschauen</button><button class="btn" id="mMenu">Hauptmenü</button></div>`);
+        $('mWatch').onclick = closeModal; $('mMenu').onclick = () => toMenu(true);
+        Sound.lose();
+      }
+    } else {
+      const O = G.opp[m.seat];
+      if (O) for (const s of m.ships || []) if (!O.known.some(x => x.id === s.id)) O.bd.ships.appendChild(shipEl(s.cc, s.key, s.r, s.c, s.h, 'reveal', s.id));
+      logAdd(`💀 ${seatName(m.seat)} ist ${m.forfeit ? 'ausgestiegen' : 'ausgeschieden'}${S.msize === 3 ? ` (Platz ${m.place})` : ''}.`, 'l-sunk');
+      if (S.msize === 3 && !G.over) toast(`💀 ${seatName(m.seat)} ist raus!`, 3000);
+    }
+    renderSides(); setTurnUI();
+    return 600;
   }
 
-  /* ----- Effekte ----- */
-  function fxEmp(bd) {
-    const d = el('div', 'fx-emp', '<i></i><i></i><i></i>');
-    bd.fx.appendChild(d); setTimeout(() => d.remove(), 1600);
-    const f = el('div', 'screen-flash emp-flash'); document.body.appendChild(f); setTimeout(() => f.remove(), 700);
-  }
-  function fxRadar(bd, sc) {
-    const d = el('div', 'fx-radar', '<i></i>');
-    Object.assign(d.style, { left: sc.c * 10 + '%', top: sc.r * 10 + '%', width: '20%', height: '20%' });
-    bd.fx.appendChild(d); setTimeout(() => d.remove(), 1500);
-  }
-  function shellFx(bd, r, c) {
-    const d = el('div', 'fx-shell');
-    Object.assign(d.style, { left: c * 10 + '%', top: r * 10 + '%', width: '10%', height: '10%' });
-    bd.fx.appendChild(d); setTimeout(() => d.remove(), 700);
-  }
-  function nukeFx(bd, r0, c0) {
-    Sound.nuke();
-    const f = el('div', 'screen-flash nuke-flash'); document.body.appendChild(f); setTimeout(() => f.remove(), 1400);
-    boomRect(bd, r0, c0, 4, 4, 'NUKE!', true);
+  function onGameover(m) {
+    G.over = true; G.busy = false; G.arm = null; clearTimeout(G.busyT);
+    if (m.forfeit) G.forfeit = true;
+    for (const s of G.order) {
+      const O = G.opp[s];
+      for (const [r, c, v] of (m.reveal && m.reveal[s]) || []) if (O.shots.get(K(r, c)) === 'unknown') { O.shots.set(K(r, c), v); setPeg(O.bd, r, c, pegType(v)); }
+      for (const sh of (m.ships && m.ships[s]) || []) if (!O.known.some(x => x.id === sh.id) && !O.bd.ships.querySelector(`[data-id="${sh.id}"]`)) O.bd.ships.appendChild(shipEl(sh.cc, sh.key, sh.r, sh.c, sh.h, 'reveal', sh.id));
+      O.bd.host.classList.add('locked');
+    }
+    m.places.forEach((p, i) => { if (S.seats[i]) S.seats[i].place = p; });
+    const won = m.winner === S.mySeat;
+    const st = $('status');
+    st.className = 'status ' + (won ? 'win' : 'lose');
+    st.textContent = won ? '🏆 Sieg! Alle feindlichen Flotten sind vernichtet.' : `💀 ${m.winner != null ? seatName(m.winner) + ' gewinnt.' : 'Spiel beendet.'}`;
+    $('side-me').style.opacity = 1;
+    renderPowerBar(); renderSides();
+    if (!(G.out && S.msize === 3 && !won)) won ? Sound.win() : Sound.lose();
+    setTimeout(() => showEnd(won), 1300);
+    return 0;
   }
 
-  function megaBoom(bd, s) {
-    const len = s.len || LEN[s.key];
-    boomRect(bd, s.r, s.c, s.h ? len : 1, s.h ? 1 : len, 'VERSENKT!', false);
+  function showEnd(won) {
+    const acc = G.stats.shots ? Math.round(G.stats.hits / G.stats.shots * 100) : 0;
+    const stats = `<div class="stats"><div><b>${G.stats.shots}</b><small>Schüsse</small></div><div><b>${G.stats.hits}</b><small>Treffer</small></div><div><b>${acc}%</b><small>Quote</small></div></div>`;
+    const ranking = S.msize === 3 ? `<div class="ranking">${S.seats.slice().sort((a, b) => (a.place || 9) - (b.place || 9)).map(s => `<div class="rk${s.seat === S.mySeat ? ' me' : ''}"><span>${['🥇', '🥈', '🥉'][(s.place || 3) - 1]}</span>${flagSVG(s.country)}<b>${esc(s.name)}</b></div>`).join('')}</div>` : '';
+    const title = won ? 'SIEG!' : S.msize === 3 && S.seats[S.mySeat].place === 2 ? 'PLATZ 2' : 'VERLOREN';
+    if (S.tcode) {
+      modal(`<h2 class="${won ? 'win' : 'lose'}">${title}</h2>
+        <p>${won ? `Stark, Kapitän ${esc(S.name)}! Du bist eine Runde weiter.${G.forfeit ? ' (Dein Gegner hat aufgegeben.)' : ''}` : `${esc(seatName(G.order[0]))} war stärker – du bist leider ausgeschieden.`}</p>
+        ${stats}<button class="btn primary" id="mTour">🏆 Zur Turnierübersicht</button><button class="btn ghost small" id="mView">Spielfeld ansehen</button>`);
+      $('mTour').onclick = () => { closeModal(); showTourney(); };
+      $('mView').onclick = () => { closeModal(); const b = el('button', 'btn small', 'Turnierübersicht'); b.style.marginLeft = '10px'; b.onclick = () => showTourney(); $('status').appendChild(b); };
+      return;
+    }
+    const winnerName = S.seats.find(s => s.place === 1);
+    modal(`<h2 class="${won ? 'win' : 'lose'}">${title}</h2>
+      <p>${won ? `Glückwunsch, Kapitän ${esc(S.name)}!` : `${esc(winnerName ? winnerName.name : '?')} hat gewonnen.`}</p>
+      ${ranking}${stats}
+      <p class="small-hint">Bei der Revanche kannst du vor dem Aufstellen deine Fraktion neu wählen.</p>
+      <div class="modal-btns"><button class="btn primary" id="mRematch">Revanche</button><button class="btn" id="mMenu">Hauptmenü</button></div>
+      <button class="btn ghost small" id="mView">Spielfeld ansehen</button>`);
+    $('mRematch').onclick = () => {
+      socket.emit('rematch');
+      if (!S.solo) { $('mRematch').disabled = true; $('mRematch').textContent = 'Warte auf die anderen …'; }
+    };
+    $('mMenu').onclick = () => toMenu(true);
+    $('mView').onclick = () => { closeModal(); const b = el('button', 'btn small', 'Ergebnis'); b.style.marginLeft = '10px'; b.onclick = () => showEnd(won); $('status').appendChild(b); };
   }
+
+  $('btnSurrender').onclick = () => {
+    if (!G || G.over || G.out) return;
+    modal(`<h2 style="font-size:30px">Aufgeben?</h2><p>${S.tcode ? 'Dein Gegner gewinnt und du scheidest aus dem Turnier aus.' : S.msize === 3 ? 'Du scheidest aus, die anderen spielen weiter.' : S.solo ? 'Die Partie wird als Niederlage gewertet.' : 'Du verlässt das Online-Spiel.'}</p>
+      <div class="modal-btns"><button class="btn danger" id="mYes">Aufgeben</button><button class="btn" id="mNo">Weiterspielen</button></div>`);
+    $('mNo').onclick = closeModal;
+    $('mYes').onclick = () => {
+      closeModal();
+      if (S.tcode || S.msize === 3) { socket.emit('leave'); return; }
+      if (S.solo) { toMenu(true); return; }
+      toMenu(true);
+    };
+  };
+  function confirmLeave() {
+    modal(`<h2 style="font-size:30px">Zum Hauptmenü?</h2><p>${S.tcode ? 'Du verlässt das Turnier.' : 'Das laufende Spiel wird beendet.'}</p>
+      <div class="modal-btns"><button class="btn danger" id="mYes">Verlassen</button><button class="btn" id="mNo">Bleiben</button></div>`);
+    $('mNo').onclick = closeModal; $('mYes').onclick = () => toMenu(true);
+  }
+  function toMenu(leave) {
+    closeModal();
+    if (leave && socket) { if (S.tcode) socket.emit('tleave'); else if (S.code) socket.emit('leave'); }
+    sess.clear(); S.code = null; S.pid = null; S.tcode = null; S.tour = null; S.tround = null; S.solo = false; G = null; P.board = null;
+    show('scrMenu');
+  }
+
+  /* ================= Effekte ================= */
+  function megaBoom(bd, s) { const len = s.len || LEN[s.key]; boomRect(bd, s.r, s.c, s.h ? len : 1, s.h ? 1 : len, 'VERSENKT!', false); }
   function boomRect(bd, r0, c0, w, h, label, nuke) {
-    const cell = bd.board.clientWidth / N, len = Math.max(w, h), area = w * h;
+    const cell = bd.board.clientWidth / N, len = Math.max(w, h);
     const box = el('div', 'fx-sink' + (nuke ? ' nuke' : ''));
     Object.assign(box.style, { left: c0 * 10 + '%', top: r0 * 10 + '%', width: w * 10 + '%', height: h * 10 + '%' });
     box.style.setProperty('--cell', cell + 'px');
@@ -703,234 +876,110 @@
     const banner = el('div', 'sunk-banner' + (nuke ? ' nuke-banner' : ''), label);
     bd.fx.append(box, banner);
     const flash = el('div', 'screen-flash'); document.body.appendChild(flash);
-    const battle = document.querySelector('.battle'); battle.classList.remove('shake-big'); void battle.offsetWidth; battle.classList.add('shake-big');
+    const battle = $('battle'); battle.classList.remove('shake-big'); void battle.offsetWidth; battle.classList.add('shake-big');
     if (!nuke) { for (let i = 0; i < Math.min(len, 4); i++) setTimeout(() => Sound.boom(), i * 170); setTimeout(() => Sound.sunk(), 250); }
     setTimeout(() => { box.remove(); banner.remove(); flash.remove(); }, nuke ? 3600 : 3200);
   }
-
-  /* ----- Computer-Zug ----- */
-  function cpuView() {
-    const shots = new Map(B.incoming);
-    for (const k of B.cpuUnk) shots.set(k, 'unk');
-    const ships = B.myShips.map(s => ({ ...s, sunk: s.sunk && !B.cpuHiddenSunk.has(s.key) }));
-    return { shots, ships };
+  function fxEmp(bd) {
+    const d = el('div', 'fx-emp', '<i></i><i></i><i></i>');
+    bd.fx.appendChild(d); setTimeout(() => d.remove(), 1600);
+    const f = el('div', 'screen-flash emp-flash'); document.body.appendChild(f); setTimeout(() => f.remove(), 700);
   }
-  function cpuMove() {
-    if (!B || B.over || B.myTurn || S.mode !== 'cpu') return;
-    B.cpuTurns++;
-    const cpu = B.cpu, blind = B.oppBlind > 0, v = cpuView();
-    if (cpu.power && !cpu.used && cpuWantsPower(v)) return cpuUsePower(v, blind);
-    const [r, c] = AI.pick(S.diff, v.shots, v.ships, cpu);
-    Sound.shot();
-    setTimeout(() => {
-      if (!B || B.over) return;
-      const { res, ship } = onIncoming(r, c);
-      if (blind) { B.cpuUnk.add(K(r, c)); if (res === 'sunk') B.cpuHiddenSunk.add(ship.key); }
-      cpuAfter(!blind && res !== 'miss', blind);
-    }, 380);
+  function fxRadar(bd, sc) {
+    const d = el('div', 'fx-radar', '<i></i>');
+    Object.assign(d.style, { left: sc.c * 10 + '%', top: sc.r * 10 + '%', width: '20%', height: '20%' });
+    bd.fx.appendChild(d); setTimeout(() => d.remove(), 1500);
   }
-  function cpuAfter(keep, wasBlind) {
-    if (wasBlind) {
-      B.oppBlind--;
-      if (B.oppBlind === 0) { B.cpuUnk.clear(); B.cpuHiddenSunk.clear(); logAdd(`${S.opp.name}: Sensoren wieder online.`); }
-      renderSides();
+  function drawScan(O, sc) {
+    const d = el('div', 'scan ' + (sc.contact ? 'contact' : 'clear'), `<span>${sc.contact ? 'KONTAKT' : 'FREI'}</span>`);
+    Object.assign(d.style, { left: sc.c * 10 + '%', top: sc.r * 10 + '%', width: '20%', height: '20%' });
+    O.bd.ships.appendChild(d);
+  }
+  function shellFx(bd, r, c) {
+    const d = el('div', 'fx-shell');
+    Object.assign(d.style, { left: c * 10 + '%', top: r * 10 + '%', width: '10%', height: '10%' });
+    bd.fx.appendChild(d); setTimeout(() => d.remove(), 700);
+  }
+  function driftFx(bd, [ar, ac], [r, c]) {
+    const d = el('div', 'fx-drift', '🎯');
+    Object.assign(d.style, { left: ac * 10 + '%', top: ar * 10 + '%' });
+    d.style.setProperty('--dx', (c - ac) * 100 + '%'); d.style.setProperty('--dy', (r - ar) * 100 + '%');
+    bd.fx.appendChild(d); setTimeout(() => d.remove(), 1200);
+  }
+  function icebergFx(bd, [r, c]) {
+    const d = el('div', 'fx-iceberg', '<div class="berg"></div><div class="crack"></div>');
+    Object.assign(d.style, { left: c * 10 + '%', top: r * 10 + '%' });
+    bd.fx.appendChild(d); setTimeout(() => d.remove(), 3600);
+  }
+  function krakenFx(bd, w) {
+    const d = el('div', 'fx-kraken');
+    const len = w.len, ww = w.h ? len : 1, hh = w.h ? 1 : len;
+    Object.assign(d.style, { left: w.c * 10 + '%', top: w.r * 10 + '%', width: ww * 10 + '%', height: hh * 10 + '%' });
+    const n = 6;
+    for (let i = 0; i < n; i++) {
+      const t = el('i', 'tentacle');
+      const along = (i + .5) / n * 100, side = i % 2 ? -1 : 1;
+      t.style.left = (w.h ? along : 50 + side * 38) + '%'; t.style.top = (w.h ? 50 + side * 38 : along) + '%';
+      t.style.setProperty('--rot', (w.h ? (side > 0 ? 180 : 0) : (side > 0 ? 90 : -90)) + rand(30) - 15 + 'deg');
+      t.style.setProperty('--d', i * 120 + 'ms');
+      d.appendChild(t);
     }
-    if (B.myShips.every(s => s.sunk)) return setTimeout(() => endGame(false, B.cpu.ships), Math.max(0, B.animUntil - Date.now()));
-    setTimeout(() => setTurn(!keep, keep), B.lastSunk ? 1600 : 0);
+    d.appendChild(el('div', 'whirl'));
+    bd.fx.appendChild(d); setTimeout(() => d.remove(), 4000);
   }
-  function cpuWantsPower(v) {
-    const cpu = B.cpu, t = B.cpuTurns;
-    const open = [...v.shots].some(([k, x]) => (x === 'hit') && !v.ships.some(s => s.sunk && s.cells.includes(k)));
-    if (cpu.power === 'artillery') return (open && t >= 2) || t >= cpu.useAt + 4;
-    if (cpu.power === 'radar') return !open && t >= cpu.useAt;
-    return t >= cpu.useAt;
+  function pirateFx(bd, ship, arriving) {
+    if (!bd) return;
+    const d = el('div', 'fx-pirate' + (arriving ? ' arrive' : ' leave'), '<div class="psail">🏴‍☠️</div>');
+    if (ship) Object.assign(d.style, { left: ship.c * 10 + '%', top: ship.r * 10 + '%' });
+    else Object.assign(d.style, { left: '45%', top: '45%' });
+    bd.fx.appendChild(d); setTimeout(() => d.remove(), 3200);
   }
-  function cpuUsePower(v, blind) {
-    const cpu = B.cpu, type = cpu.power; cpu.used = true;
-    if (type === 'emp') return oppPowerFx({ type, blind: EMP_TURNS }, () => cpuAfter(false, blind));
-    let [r, c] = AI.pick(S.diff === 'easy' ? 'normal' : S.diff, v.shots, v.ships, cpu);
-    let h = Math.random() < .5;
-    if (type === 'artillery') {
-      // entlang einer erkannten Trefferlinie ausrichten
-      const hits = [...v.shots].filter(([, x]) => x === 'hit').map(([k]) => k.split(',').map(Number));
-      if (hits.some(([a, b]) => hits.some(([a2, b2]) => a2 === a && Math.abs(b2 - b) === 1))) h = true;
-      else if (hits.some(([a, b]) => hits.some(([a2, b2]) => b2 === b && Math.abs(a2 - a) === 1))) h = false;
-    }
-    const cells = areaCells(type, r, c, h);
-    if (type === 'radar') {
-      const contact = B.myShips.some(s => cells.some(([a, b]) => s.cells.includes(K(a, b))));
-      const free = cells.filter(([a, b]) => !B.incoming.has(K(a, b)));
-      if (contact) cpu.queue.push(...free); else free.forEach(([a, b]) => cpu.clear.add(K(a, b)));
-      return oppPowerFx({ type, scan: { r: cells[0][0], c: cells[0][1] } }, () => cpuAfter(false, blind));
-    }
-    const shots = cells.filter(([a, b]) => !B.incoming.has(K(a, b))).map(([a, b]) => ({ r: a, c: b }));
-    Sound.shot();
-    oppPowerFx({ type, cells, shots }, results => {
-      results.forEach((x, i) => { if (blind) { B.cpuUnk.add(K(shots[i].r, shots[i].c)); if (x.res === 'sunk') B.cpuHiddenSunk.add(x.ship.key); } });
-      cpuAfter(!blind && results.some(x => x.res !== 'miss'), blind);
-    });
+  function stormFx(bd) {
+    const d = el('div', 'fx-storm', '<i></i><i></i><i></i><i></i><i></i><div class="vortex">🌪️</div>');
+    bd.fx.appendChild(d); setTimeout(() => d.remove(), 3500);
+    bd.board.classList.add('stormy'); setTimeout(() => bd.board.classList.remove('stormy'), 3200);
   }
-
-  function logAdd(t, cls = '') { if (!B) return; B.log.unshift({ t, cls }); B.log.length = Math.min(B.log.length, 30); renderLog(); }
-  function renderLog() { $('log').innerHTML = B.log.slice(0, 5).map(l => `<div class="${l.cls}">${esc(l.t)}</div>`).join(''); }
-
-  function endGame(won, oppShips, silent = false) {
-    if (S.mode === 'cpu' && B.hiddenTruth.size) revealLocal();
-    B.over = true; B.busy = false; B.arm = null;
-    enBd.host.classList.add('locked');
-    $('sideMe').style.opacity = 1; $('sideEnemy').style.opacity = 1;
-    if (oppShips) for (const s of oppShips) {
-      if (!B.enemySunk.some(x => x.key === s.key)) enBd.ships.appendChild(shipEl(S.opp.country, s.key, s.r, s.c, s.h, 'reveal'));
-    }
-    const st = $('status');
-    st.className = 'status ' + (won ? 'win' : 'lose');
-    st.textContent = won ? '🏆 Sieg! Die feindliche Flotte ist vernichtet.' : '💀 Niederlage – deine Flotte wurde versenkt.';
-    renderPowerBar();
-    if (!silent) won ? Sound.win() : Sound.lose();
-    setTimeout(() => showEnd(won), silent ? 0 : 1300);
+  function diarrheaFx(bd) {
+    const d = el('div', 'fx-diarrhea', '<div class="dia-icon">🚽</div><div class="dia-wave"></div>');
+    bd.fx.appendChild(d); setTimeout(() => d.remove(), 3200);
   }
-  function showEnd(won) {
-    const acc = B.stats.shots ? Math.round(B.stats.hits / B.stats.shots * 100) : 0;
-    if (S.tcode) {
-      modal(`<h2 class="${won ? 'win' : 'lose'}">${won ? 'SIEG!' : 'VERLOREN'}</h2>
-        <p>${won ? `Stark, Kapitän ${esc(S.name)}! Du bist eine Runde weiter.${B.forfeit ? ' (Dein Gegner hat aufgegeben.)' : ''}` : `${esc(S.opp.name)} war stärker – du bist leider ausgeschieden.`}</p>
-        <div class="stats"><div><b>${B.stats.shots}</b><small>Schüsse</small></div><div><b>${B.stats.hits}</b><small>Treffer</small></div><div><b>${acc}%</b><small>Quote</small></div></div>
-        <button class="btn primary" id="mTour">🏆 Zur Turnierübersicht</button>
-        <button class="btn ghost small" id="mView">Spielfeld ansehen</button>`);
-      $('mTour').onclick = () => { closeModal(); showTourney(); };
-      $('mView').onclick = () => {
-        closeModal();
-        const b = el('button', 'btn small', 'Turnierübersicht'); b.style.marginLeft = '10px';
-        b.onclick = () => showTourney(); $('status').appendChild(b);
-      };
-      return;
-    }
-    modal(`<h2 class="${won ? 'win' : 'lose'}">${won ? 'SIEG!' : 'VERLOREN'}</h2>
-      <p>${won ? `Glückwunsch, Kapitän ${esc(S.name)}! Du hast ${esc(S.opp.name)} besiegt.` : `${esc(S.opp.name)} hat deine Flotte versenkt.`}</p>
-      <div class="stats"><div><b>${B.stats.shots}</b><small>Schüsse</small></div><div><b>${B.stats.hits}</b><small>Treffer</small></div><div><b>${acc}%</b><small>Quote</small></div></div>
-      <p class="small-hint">Bei der Revanche kannst du vor dem Aufstellen deine Fraktion neu wählen.</p>
-      <div class="modal-btns"><button class="btn primary" id="mRematch">Revanche</button><button class="btn" id="mMenu">Hauptmenü</button></div>
-      <button class="btn ghost small" id="mView">Spielfeld ansehen</button>`);
-    $('mRematch').onclick = () => {
-      if (S.mode === 'cpu') return initPlacement();
-      socket.emit('rematch');
-      $('mRematch').disabled = true; $('mRematch').textContent = `Warte auf ${S.opp.name} …`;
-    };
-    $('mMenu').onclick = () => toMenu(true);
-    $('mView').onclick = () => {
-      closeModal();
-      const b = el('button', 'btn small', 'Ergebnis'); b.style.marginLeft = '10px';
-      b.onclick = () => showEnd(won); $('status').appendChild(b);
-    };
-  }
-
-  $('btnSurrender').onclick = () => {
-    if (!B || B.over) return;
-    modal(`<h2 style="font-size:30px">Aufgeben?</h2><p>${S.mode === 'cpu' ? 'Die Partie wird als Niederlage gewertet.' : S.tcode ? 'Dein Gegner gewinnt und du scheidest aus dem Turnier aus.' : 'Du verlässt das Online-Spiel. Dein Gegner gewinnt.'}</p>
-      <div class="modal-btns"><button class="btn danger" id="mYes">Aufgeben</button><button class="btn" id="mNo">Weiterspielen</button></div>`);
-    $('mNo').onclick = closeModal;
-    $('mYes').onclick = () => { closeModal(); if (S.mode === 'cpu') endGame(false, B.cpu.ships); else if (S.tcode) { socket.emit('leave'); endGame(false, null); } else toMenu(true); };
-  };
-
-  function confirmLeave() {
-    modal(`<h2 style="font-size:30px">Zum Hauptmenü?</h2><p>${S.tcode ? 'Du verlässt das Turnier.' : 'Das laufende Spiel wird beendet.'}</p>
-      <div class="modal-btns"><button class="btn danger" id="mYes">Verlassen</button><button class="btn" id="mNo">Bleiben</button></div>`);
-    $('mNo').onclick = closeModal; $('mYes').onclick = () => toMenu(true);
-  }
-  function toMenu(leave) {
-    closeModal();
-    if (leave && S.tcode && socket) socket.emit('tleave');
-    else if (leave && S.mode === 'online' && socket) socket.emit('leave');
-    sess.clear(); S.mode = null; S.code = null; S.pid = null; S.tcode = null; S.tour = null; S.tround = null; B = null; P.board = null;
-    show('scrMenu');
-  }
-
-  /* ================= Computer-Gegner ================= */
-  const AI = {
-    pick(diff, shots, ships, cpu = {}) {
-      const clear = cpu.clear || new Set(), queue = cpu.queue || [];
-      const sunkCells = new Set(ships.filter(s => s.sunk).flatMap(s => s.cells));
-      const isHit = v => v === 'hit' || v === 'sunk';
-      const open = [...shots].filter(([k, v]) => isHit(v) && !sunkCells.has(k)).map(([k]) => k.split(',').map(Number));
-      const free = (r, c) => inB(r, c) && !shots.has(K(r, c));
-      const all0 = []; for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) if (free(r, c)) all0.push([r, c]);
-      const pool = all0.filter(([r, c]) => !clear.has(K(r, c)));
-      const all = pool.length ? pool : all0;
-      const any = arr => arr[rand(arr.length)];
-      if (!open.length) { const q = queue.filter(([r, c]) => free(r, c)); if (q.length) return any(q); }
-      if (diff === 'easy') {
-        if (open.length && Math.random() < .5) { const n = this.neighbors(open, free); if (n.length) return any(n); }
-        return any(all);
-      }
-      if (diff === 'normal') {
-        if (open.length) { const t = this.target(open, free); if (t.length) return any(t); }
-        const par = all.filter(([r, c]) => (r + c) % 2 === 0);
-        return any(par.length ? par : all);
-      }
-      const lens = ships.filter(s => !s.sunk).map(s => s.len);
-      const blocked = (r, c) => { const v = shots.get(K(r, c)); return v === 'miss' || v === 'unk' || sunkCells.has(K(r, c)) || clear.has(K(r, c)); };
-      const openSet = new Set(open.map(([r, c]) => K(r, c)));
-      const score = Array(N * N).fill(0);
-      for (const L of lens) for (const h of [true, false]) for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
-        const cs = Array.from({ length: L }, (_, i) => h ? [r, c + i] : [r + i, c]);
-        if (cs.some(([a, b]) => !inB(a, b) || blocked(a, b))) continue;
-        const hc = cs.filter(([a, b]) => openSet.has(K(a, b))).length;
-        const w = hc ? Math.pow(40, hc) : (open.length ? 0.02 : 1);
-        for (const [a, b] of cs) if (free(a, b)) score[a * N + b] += w;
-      }
-      let best = -1, cand = [];
-      for (const [r, c] of all) {
-        const v = score[r * N + c] + ((r + c) % 2 === 0 ? 0.01 : 0);
-        if (v > best + 1e-9) { best = v; cand = [[r, c]]; } else if (Math.abs(v - best) < 1e-9) cand.push([r, c]);
-      }
-      return any(cand.length ? cand : all);
-    },
-    neighbors(open, free) {
-      const out = [];
-      for (const [r, c] of open) for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (free(r + dr, c + dc)) out.push([r + dr, c + dc]);
-      return out;
-    },
-    target(open, free) {
-      const set = new Set(open.map(([r, c]) => K(r, c))), line = [];
-      for (const [r, c] of open) {
-        for (const [dr, dc] of [[0, 1], [1, 0]]) {
-          if (!set.has(K(r + dr, c + dc)) && !set.has(K(r - dr, c - dc))) continue;
-          let a = r, b = c; while (set.has(K(a + dr, b + dc))) { a += dr; b += dc; }
-          if (free(a + dr, b + dc)) line.push([a + dr, b + dc]);
-          a = r; b = c; while (set.has(K(a - dr, b - dc))) { a -= dr; b -= dc; }
-          if (free(a - dr, b - dc)) line.push([a - dr, b - dc]);
-        }
-      }
-      return line.length ? line : this.neighbors(open, free);
-    },
-  };
 
   /* ================= Online ================= */
   const socket = (!window.__noSocket && window.io) ? window.io() : null;
   const params = new URLSearchParams(location.search);
   const inviteCode = (params.get('room') || '').toUpperCase().slice(0, 5);
-
   if (!socket) {
-    $('onlineHint').textContent = 'Online-Modus nur verfügbar, wenn das Spiel über den Server läuft.';
-    ['btnHost', 'btnJoin'].forEach(b => $(b).disabled = true);
+    $('onlineHint').textContent = 'Das Spiel muss über den Server laufen (Link öffnen).';
+    ['btnHost', 'btnJoin', 'btnCpu', 'btnTourney'].forEach(b => $(b).disabled = true);
   }
   function setInviteMode(on) {
     $('joinInvite').classList.toggle('hidden', !on);
     $('modeField').classList.toggle('hidden', on);
     document.querySelector('.modes').classList.toggle('hidden', on);
   }
+  const modeTxt = (pu, ev, size) => `${size === 3 ? '🔱 3 Spieler · ' : ''}${pu ? '⚡ Mit Power-ups' : '⚓ Klassisch'}${ev ? ' · 🎲 Zufallsereignisse' : ''}`;
   if (inviteCode && socket) {
     setInviteMode(true); $('inviteCode').textContent = inviteCode; $('inCode').value = inviteCode;
     socket.emit('peek', { code: inviteCode }, res => {
       if (!res.ok) { $('inviteInfo').innerHTML = `<span class="err">${esc(res.error)}</span>`; $('btnAcceptInvite').disabled = true; return; }
       S.inviteTourney = !!res.tourney;
-      $('inviteInfo').innerHTML = res.tourney
-        ? `🏆 <b>Turnier</b> von ${flagSVG(res.hostCountry)} <b>${esc(res.host)}</b> · ${res.count} ${res.count === 1 ? 'Spieler' : 'Spieler'} angemeldet<br>Spielmodus: <b>${res.powerups ? '⚡ Mit Power-ups' : '⚓ Klassisch'}</b> <small>(vom Gastgeber festgelegt)</small>`
-        : `${flagSVG(res.hostCountry)} <b>${esc(res.host)}</b> fordert dich heraus<br>Spielmodus: <b>${res.powerups ? '⚡ Mit Power-ups' : '⚓ Klassisch'}</b> <small>(vom Gastgeber festgelegt)</small>`;
+      $('inviteInfo').innerHTML = (res.tourney
+        ? `🏆 <b>Turnier</b> von ${flagSVG(res.hostCountry)} <b>${esc(res.host)}</b> · ${res.count} Spieler angemeldet`
+        : `${flagSVG(res.hostCountry)} <b>${esc(res.host)}</b> fordert dich heraus${res.size === 3 ? ` · 3-Spieler-Partie (${res.count}/3)` : ''}`) +
+        `<br>Regeln: <b>${modeTxt(res.powerups, res.events, res.size)}</b> <small>(vom Gastgeber festgelegt)</small>`;
     });
   }
   $('btnIgnoreInvite').onclick = () => { setInviteMode(false); $('inCode').value = ''; history.replaceState(null, '', location.pathname); };
 
+  $('btnCpu').onclick = () => {
+    if (!getName() || !socket) return;
+    Sound.click();
+    socket.emit('solo', { name: S.name, country: S.country, diff: S.diff, size: S.size, powerups: S.pmode === 'power', events: S.events }, res => {
+      if (!res.ok) return toast('Spiel konnte nicht gestartet werden.');
+      S.code = res.code; S.pid = res.pid; S.solo = true;
+      sess.set({ code: S.code, pid: S.pid });
+    });
+  };
   function joinRoom(code) {
     if (!getName() || !socket) return;
     code = (code || '').toUpperCase().trim();
@@ -938,32 +987,41 @@
     socket.emit('join', { code, name: S.name, country: S.country }, res => {
       if (!res.ok && res.tourney) return joinTourney(code);
       if (!res.ok) { toast(res.error || 'Beitritt fehlgeschlagen.'); Sound.err(); return; }
-      S.mode = 'online'; S.code = res.code; S.pid = res.pid; S.bonus = true; S.powerups = !!res.powerups;
+      S.code = res.code; S.pid = res.pid; S.solo = false;
       sess.set({ code: S.code, pid: S.pid });
       history.replaceState(null, '', location.pathname);
       setInviteMode(false);
+      if (res.size === 3) showLobby(res.size, false);
     });
   }
   $('btnJoin').onclick = () => joinRoom($('inCode').value);
   $('inCode').addEventListener('keydown', e => { if (e.key === 'Enter') joinRoom($('inCode').value); });
-
   $('btnHost').onclick = () => {
     if (!getName() || !socket) return;
     Sound.click();
-    socket.emit('create', { name: S.name, country: S.country, powerups: S.pmode === 'power' }, res => {
+    socket.emit('create', { name: S.name, country: S.country, size: S.size, powerups: S.pmode === 'power', events: S.events }, res => {
       if (!res.ok) return toast('Raum konnte nicht erstellt werden.');
-      S.mode = 'online'; S.code = res.code; S.pid = res.pid;
+      S.code = res.code; S.pid = res.pid; S.solo = false;
       sess.set({ code: S.code, pid: S.pid });
-      showLobby();
+      showLobby(res.size, true);
     });
   };
-  function showLobby() {
+  function showLobby(size, host) {
     const link = `${location.origin}${location.pathname}?room=${S.code}`;
+    $('lobbyTitle').textContent = host ? (size === 3 ? '3er-Raum erstellt' : 'Raum erstellt') : 'Beigetreten – warte auf Mitspieler';
     $('lobbyCode').textContent = S.code; $('lobbyLink').value = link;
-    $('lobbyMode').textContent = 'Modus: ' + (S.pmode === 'power' && S.mode === 'online' ? '⚡ Mit Power-ups' : '⚓ Klassisch');
     $('btnShare').classList.toggle('hidden', !navigator.share);
+    $('lobbyMode').textContent = host ? 'Regeln: ' + modeTxt(S.pmode === 'power', S.events, size) : '';
+    $('lobbyWait').textContent = size === 3 ? 'Warte auf Mitspieler (3 werden gebraucht) …' : 'Warte auf Gegner …';
     show('scrLobby');
   }
+  socket && socket.on('lobby', L => {
+    if (S.screen !== 'scrLobby') showLobby(L.size, L.isHost);
+    $('lobbyMode').textContent = 'Regeln: ' + modeTxt(L.powerups, L.events, L.size);
+    $('lobbyPlayers').innerHTML = L.size === 3 ? L.players.map(p => `<div class="t-part${p.me ? ' me' : ''}">${flagSVG(p.country)}<span>${esc(p.name)}${p.me ? ' <i>(du)</i>' : ''}</span></div>`).join('') + (L.players.length < 3 ? '<div class="t-part ghost">⏳ <span>freier Platz</span></div>' : '') : '';
+    $('btnFillBots').classList.toggle('hidden', !(L.isHost && L.size === 3 && L.players.length === 2));
+  });
+  $('btnFillBots').onclick = () => { Sound.click(); socket.emit('fillBots'); };
   $('btnCopy').onclick = async () => {
     const v = $('lobbyLink').value;
     try { await navigator.clipboard.writeText(v); } catch { $('lobbyLink').select(); document.execCommand('copy'); }
@@ -972,130 +1030,144 @@
   $('btnShare').onclick = () => navigator.share({ title: 'Schiffe versenken', text: `${S.name} fordert dich zu einer Partie Schiffe versenken heraus!`, url: $('lobbyLink').value }).catch(() => { });
   $('btnLobbyCancel').onclick = () => toMenu(true);
 
+  document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT') return;
+    if ((e.key === 'r' || e.key === 'R') && S.screen === 'scrPlace') rotate();
+    if (S.screen === 'scrBattle' && G && G.arm) {
+      if (e.key === 'Escape') { G.arm = null; clearPreview(); renderPowerBar(); }
+      if ((e.key === 'r' || e.key === 'R') && G.arm.type === 'artillery') { G.armH = !G.armH; refreshPreview(); }
+    }
+  });
+
+  function applyMatched(m) {
+    S.seats = m.seats; S.mySeat = m.mySeat; S.msize = m.size; S.powerups = m.powerups; S.mevents = m.events; S.nPowers = m.nPowers;
+    S.tround = m.tourney ? m.round : null; S.solo = !!m.solo; S.code = m.code || S.code;
+    if (m.seats[m.mySeat]) { S.country = m.seats[m.mySeat].country; S.name = m.seats[m.mySeat].name; }
+  }
+
   if (socket) {
     socket.on('connect', () => {
       const ss = sess.get();
       if (!ss) return;
       socket.emit('rejoin', ss, res => {
-        if (!res.ok) { if (S.mode === 'online' || S.tcode) { toast('Das Spiel existiert nicht mehr.'); toMenu(false); } else sess.clear(); return; }
+        if (!res.ok) { if (S.code || S.tcode) { toast('Das Spiel existiert nicht mehr.'); toMenu(false); } else sess.clear(); return; }
         S.pid = ss.pid;
         if (res.tourney) {
-          S.tcode = ss.tcode; S.tour = res.tourney; S.powerups = res.tourney.powerups;
+          S.tcode = ss.tcode; S.tour = res.tourney;
           if (res.state) applySync(res.state);
-          else if (!['scrPlace', 'scrBattle'].includes(S.screen) || !B) showTourney();
+          else if (!['scrPlace', 'scrBattle'].includes(S.screen) || !G) showTourney();
           return;
         }
+        if (res.lobby) { S.code = res.code; if (S.screen !== 'scrLobby') showLobby(res.size, false); return; }
         applySync(res.state);
       });
     });
-    socket.on('disconnect', () => { if (S.mode === 'online') toast('Verbindung unterbrochen – verbinde neu …', 4000); });
-    socket.on('matched', ({ opp, powerups, tourney, round }) => {
-      S.opp = opp; S.bonus = true; S.powerups = !!powerups; S.oppOnline = true; S.oppReady = false; S.mode = 'online';
-      S.tround = tourney ? round : null;
-      B = null; initPlacement(); Sound.ping();
-      if (tourney) { diceFx(); toast(`🎲 Runde ${round} ausgelost – dein Gegner: ${opp.name}`, 4000); }
-      else toast(`${opp.name} ist an Bord! Stellt eure Flotten auf.`);
+    socket.on('disconnect', () => { if (S.code || S.tcode) toast('Verbindung unterbrochen – verbinde neu …', 4000); });
+    socket.on('matched', m => {
+      applyMatched(m);
+      G = null; Q = Promise.resolve(); initPlacement(); Sound.ping();
+      if (m.tourney) { diceFx(); toast(`🎲 Runde ${m.round} ausgelost – dein Gegner: ${m.seats.find(s => s.seat !== m.mySeat).name}`, 4000); }
+      else if (!m.solo) toast(m.size === 3 ? 'Alle an Bord! Stellt eure Flotten auf.' : `${m.seats.find(s => s.seat !== m.mySeat).name} ist an Bord! Stellt eure Flotten auf.`);
     });
+    socket.on('oppCountry', ({ seat, country }) => {
+      if (!S.seats[seat] || !COUNTRIES[country]) return;
+      S.seats[seat].country = country;
+      if (S.screen === 'scrPlace') renderPlaceVs();
+      toast(`${S.seats[seat].name} kommandiert jetzt: ${COUNTRIES[country].name}`);
+    });
+    socket.on('oppReady', ({ seat }) => {
+      if (S.seats[seat]) S.seats[seat].ready = true;
+      if (S.screen === 'scrPlace') { renderPlaceVs(); if (P.locked) showWait(); }
+    });
+    socket.on('start', ({ turn }) => {
+      newGame(FLEET.map(f => ({ id: f.key, key: f.key, cc: S.country, len: f.len, ...P.placed[f.key] })));
+      G.powers = P.powers.map(t => ({ type: t, uses: t === 'artillery' ? 2 : 1, max: t === 'artillery' ? 2 : 1 }));
+      G.turn = turn;
+      renderBattle();
+      logAdd(turn === S.mySeat ? 'Das Los hat entschieden: Du beginnst!' : `Das Los hat entschieden: ${seatName(turn)} beginnt.`);
+      if (turn === S.mySeat) Sound.ping();
+    });
+    socket.on('turn', ({ turn, again }) => enqueue(() => {
+      if (!G) return 0;
+      G.busy = false; G.turn = turn; G.again = again;
+      setTurnUI();
+      if (turn === S.mySeat && !again) Sound.ping();
+      return 0;
+    }));
+    socket.on('shot', m => enqueue(() => G ? onShot(m) : 0));
+    socket.on('power', m => enqueue(() => G ? onPower(m) : 0));
+    socket.on('event', m => enqueue(() => G ? onEvent(m) : 0));
+    socket.on('eliminated', m => enqueue(() => G ? onEliminated(m) : 0));
+    socket.on('gameover', m => enqueue(() => G ? onGameover(m) : 0));
+    socket.on('empEnd', ({ target, reveal, sunk }) => enqueue(() => {
+      if (!G) return 0;
+      const O = G.opp[target];
+      for (const [r, c, v] of reveal) { if (O.shots.get(K(r, c)) !== 'unknown') continue; O.shots.set(K(r, c), v); if (v !== 'miss') G.stats.hits++; setPeg(O.bd, r, c, pegType(v), v !== 'miss'); }
+      for (const s of sunk) if (!O.known.some(x => x.id === s.id)) { O.known.push(s); O.bd.ships.appendChild(shipEl(s.cc, s.key, s.r, s.c, s.h, 'sunk sunk-enemy', s.id)); logAdd(`Aufklärung: ${shipName(s)} wurde während des EMP versenkt!`, 'l-sunk'); }
+      logAdd('⚡ EMP vorbei – deine Sensoren sind wieder online.'); toast('⚡ Sensoren wieder online – Ergebnisse aufgedeckt!');
+      G.blind = 0; updateEmp(); renderSides(); setTurnUI();
+      return 600;
+    }));
+    socket.on('oppRematch', ({ seat }) => {
+      toast(`${seatName(seat)} will eine Revanche!`);
+      const b = $('mRematch'); if (b && !b.disabled) b.textContent = 'Revanche annehmen';
+    });
+    socket.on('oppStatus', ({ seat, online }) => {
+      if (S.seats[seat]) S.seats[seat].online = online;
+      toast(online ? `${seatName(seat)} ist wieder verbunden.` : `${seatName(seat)} hat die Verbindung verloren – warte bis zu 2 Minuten …`, 3500);
+      if (G && S.screen === 'scrBattle') renderSides();
+    });
+    socket.on('oppLeft', () => {
+      if (!S.code) return;
+      sess.clear();
+      modal(`<h2 style="font-size:30px">Spiel beendet</h2><p>Ein Mitspieler hat das Spiel verlassen.</p><button class="btn primary" id="mMenu">Zum Hauptmenü</button>`);
+      $('mMenu').onclick = () => toMenu(false);
+    });
+    socket.on('errorMsg', m => { toast(m); if (P.locked && S.screen === 'scrPlace') { P.locked = false; renderPlace(); $('waitMsg').classList.add('hidden'); } });
     socket.on('tstate', st => {
       const prev = S.tour;
-      S.tour = st; S.powerups = st.powerups;
+      S.tour = st;
       if (S.screen === 'scrTourney') renderTourney();
       if (st.phase === 'done' && (!prev || prev.phase !== 'done')) setTimeout(showChampion, S.screen === 'scrBattle' ? 2500 : 300);
     });
-    socket.on('oppCountry', ({ country }) => {
-      if (!S.opp || !COUNTRIES[country]) return;
-      S.opp.country = country;
-      if (S.screen === 'scrPlace') renderPlaceVs();
-      toast(`${S.opp.name} kommandiert jetzt: ${COUNTRIES[country].name}`);
-    });
-    socket.on('oppReady', () => {
-      S.oppReady = true;
-      if (P.locked) showWait(); else toast(`${S.opp.name} ist bereit!`);
-    });
-    socket.on('start', ({ myTurn }) => {
-      newBattle(P.placed); renderBattle();
-      logAdd(myTurn ? 'Das Los hat entschieden: Du beginnst!' : `Das Los hat entschieden: ${S.opp.name} beginnt.`);
-      setTurn(myTurn);
-    });
-    socket.on('result', ({ r, c, res, ship, myTurn, blind }) => {
-      if (!B || B.outgoing.has(K(r, c))) return;
-      onResult(r, c, res, ship);
-      B.blind = blind || 0; updateEmp();
-      if (B.over || res === 'sunk' && B.enemySunk.length === FLEET.length) { B.busy = false; return; }
-      setTurn(myTurn, myTurn && (res === 'hit' || res === 'sunk'));
-    });
-    socket.on('incoming', ({ r, c, myTurn }) => {
-      if (!B || B.incoming.has(K(r, c))) return;
-      if (B.oppBlind > 0) B.oppBlind--;
-      const { res } = onIncoming(r, c);
-      if (!B.myShips.every(s => s.sunk)) setTurn(myTurn, !myTurn && res !== 'miss');
-    });
-    socket.on('powerResult', m => {
-      if (!B) return;
-      clearTimeout(B.shotTimer);
-      if (m.type === 'emp') B.oppBlind = EMP_TURNS;
-      myPowerFx(m, () => { B.blind = m.blind || 0; updateEmp(); setTurn(m.myTurn, m.myTurn); });
-    });
-    socket.on('powerIncoming', m => {
-      if (!B) return;
-      if (B.oppBlind > 0) B.oppBlind--;
-      oppPowerFx(m, results => { if (!B.myShips.every(s => s.sunk)) setTurn(m.myTurn, !m.myTurn && results.some(x => x.res !== 'miss')); });
-    });
-    socket.on('empEnd', ({ reveal, sunk }) => {
-      if (!B) return;
-      setTimeout(() => revealBlind(reveal, sunk), Math.max(0, B.animUntil - Date.now()));
-    });
-    socket.on('gameover', ({ won, oppShips, reveal, forfeit }) => {
-      if (!B || B.over) return;
-      if (forfeit) { B.forfeit = true; toast(`${S.opp.name} hat aufgegeben bzw. die Verbindung verloren.`, 4000); }
-      setTimeout(() => {
-        if (reveal) revealBlind(reveal.filter(([r, c]) => B.outgoing.get(K(r, c)) === 'unknown'), []);
-        endGame(won, oppShips);
-      }, Math.max(0, B.animUntil - Date.now()));
-    });
-    socket.on('oppRematch', () => {
-      toast(`${S.opp.name} will eine Revanche!`);
-      const b = $('mRematch'); if (b && !b.disabled) b.textContent = 'Revanche annehmen';
-    });
-    socket.on('oppStatus', ({ online }) => {
-      S.oppOnline = online;
-      toast(online ? `${S.opp.name} ist wieder verbunden.` : `${S.opp.name} hat die Verbindung verloren – warte bis zu 2 Minuten …`, 3500);
-      if (B && S.screen === 'scrBattle') renderSides();
-    });
-    socket.on('oppLeft', () => {
-      if (S.mode !== 'online') return;
-      sess.clear();
-      modal(`<h2 style="font-size:30px">Spiel beendet</h2><p>${esc(S.opp ? S.opp.name : 'Dein Gegner')} hat das Spiel verlassen.</p><button class="btn primary" id="mMenu">Zum Hauptmenü</button>`);
-      $('mMenu').onclick = () => toMenu(false);
-    });
-    socket.on('errorMsg', m => toast(m));
   }
 
   function applySync(st) {
-    S.mode = 'online'; S.code = st.code; S.bonus = true; S.powerups = !!st.powerups; if (st.tourney) S.tround = st.round;
-    if (st.me) { S.name = st.me.name; S.country = st.me.country; }
-    if (st.opp) { S.opp = st.opp; S.oppOnline = st.opp.online !== false; }
-    S.oppReady = st.oppReady;
-    if (st.phase === 'lobby') return showLobby();
-    const fromList = list => Object.fromEntries(list.map(s => [s.key, { r: s.r, c: s.c, h: s.h }]));
+    applyMatched(st);
+    S.code = st.code;
     if (st.phase === 'placing') {
-      if (!st.ready) { if (S.screen !== 'scrPlace' || !P.board) initPlacement(); return; }
       if (S.screen !== 'scrPlace' || !P.board) initPlacement();
-      P.placed = fromList(st.myShips); P.power = st.myPower; P.locked = true; P.sel = null; renderPlace(); showWait();
+      const meSeat = st.seats[st.mySeat];
+      if (meSeat.ready && st.myShips) {
+        P.placed = Object.fromEntries(st.myShips.map(s => [s.key, { r: s.r, c: s.c, h: s.h }]));
+        P.powers = (st.myPowers || []).map(p => p.type); P.locked = true; P.sel = null; renderPlace(); showWait();
+      }
       return;
     }
-    const oldLog = B ? B.log : [];
-    P.placed = fromList(st.myShips); P.power = st.myPower;
-    newBattle(P.placed); B.log = oldLog;
-    for (const [r, c] of st.incoming) { const { res } = strike(B.myShips, r, c); B.incoming.set(K(r, c), res); }
-    for (const [r, c, res] of st.outgoing) { B.outgoing.set(K(r, c), res); B.stats.shots++; if (res === 'hit' || res === 'sunk') B.stats.hits++; }
-    B.enemySunk = st.enemySunk;
-    if (B.power) { B.power.used = !!st.myPowerUsed; B.oppPower = { type: st.oppPower, used: !!st.oppPowerUsed }; }
-    B.blind = st.blind || 0; B.oppBlind = st.oppBlind || 0; B.scans = st.scans || [];
+    const oldLog = G ? G.log : [];
+    newGame(st.myShips || []);
+    G.log = oldLog; G.turn = st.turn;
+    G.powers = (st.myPowers || []).map(p => ({ type: p.type, uses: p.uses, max: p.type === 'artillery' ? 2 : 1 }));
+    G.blind = st.blind || 0; G.drunk = st.drunk || 0;
+    for (const [r, c, v] of st.incoming) G.incoming.set(K(r, c), v);
+    for (const s of G.order) {
+      const O = G.opp[s];
+      for (const [r, c, v] of st.shots[s] || []) { O.shots.set(K(r, c), v); G.stats.shots++; if (v === 'hit' || v === 'sunk') G.stats.hits++; }
+      O.known = st.known[s] || [];
+      O.scans = (st.scans || []).filter(x => x.target === s);
+    }
+    G.out = !!st.seats[st.mySeat].out;
+    Q = Promise.resolve();
     closeModal();
     renderBattle();
-    if (st.phase === 'over') { endGame(st.won, st.oppShips, true); if (st.myRematch) { const b = $('mRematch'); b.disabled = true; b.textContent = `Warte auf ${S.opp.name} …`; } }
-    else setTurn(st.myTurn);
+    if (st.phase === 'over') {
+      G.over = true;
+      const won = st.winner === S.mySeat;
+      $('status').className = 'status ' + (won ? 'win' : 'lose');
+      $('status').textContent = won ? '🏆 Sieg!' : 'Spiel beendet.';
+      showEnd(won);
+      if (st.myRematch) { const b = $('mRematch'); if (b) { b.disabled = true; b.textContent = 'Warte auf die anderen …'; } }
+    }
   }
 
   /* ================= Turnier ================= */
@@ -1103,7 +1175,7 @@
     if (!getName() || !socket) return;
     socket.emit('tjoin', { code, name: S.name, country: S.country }, res => {
       if (!res.ok) { toast(res.error || 'Beitritt fehlgeschlagen.'); Sound.err(); return; }
-      S.tcode = res.code; S.pid = res.pid; S.powerups = !!res.powerups;
+      S.tcode = res.code; S.pid = res.pid;
       sess.set({ tcode: S.tcode, pid: S.pid });
       history.replaceState(null, '', location.pathname);
       setInviteMode(false);
@@ -1114,9 +1186,9 @@
   $('btnTourney').onclick = () => {
     if (!getName() || !socket) return;
     Sound.click();
-    socket.emit('tcreate', { name: S.name, country: S.country, powerups: S.pmode === 'power' }, res => {
+    socket.emit('tcreate', { name: S.name, country: S.country, powerups: S.pmode === 'power', events: S.events }, res => {
       if (!res.ok) return toast('Turnier konnte nicht erstellt werden.');
-      S.tcode = res.code; S.pid = res.pid; S.powerups = S.pmode === 'power';
+      S.tcode = res.code; S.pid = res.pid;
       sess.set({ tcode: S.tcode, pid: S.pid });
       showTourney();
     });
@@ -1126,7 +1198,7 @@
     const T = S.tour;
     if (!T) { $('tMsg').textContent = 'Lade Turnier …'; return; }
     $('tCode').textContent = T.code;
-    $('tMode').textContent = T.powerups ? '⚡ Mit Power-ups' : '⚓ Klassisch';
+    $('tMode').textContent = modeTxt(T.powerups, T.events, 2);
     const lobby = T.phase === 'lobby';
     $('tInvite').classList.toggle('hidden', !lobby);
     $('tLink').value = `${location.origin}${location.pathname}?room=${T.code}`;

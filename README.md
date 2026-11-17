@@ -23,6 +23,12 @@ Spielmodi: **Klassisch** oder **Mit Power-ups** (EMP, Artilleriebeschuss, Nuke, 
 
 **Turnier:** „🏆 Turnier erstellen“ → Link an alle schicken → Host startet. Paarungen werden jede Runde neu ausgelost (K.-o.-System); bei ungerader Spielerzahl kommt automatisch ein Bot (Normal) dazu.
 
+**3 Spieler:** Jeder gegen jeden – pro Schuss frei wählbar, auf welchen Gegner. Gegen 2 Computer oder online (fehlender 3. Platz per Bot auffüllbar). Mit Power-ups: 2 pro Spieler.
+
+**Zufallsereignisse** (optional): Eisberg (beschädigt ein Schiff), Piratenangriff (kapert ein gegnerisches Schiff), Orkanböen (versetzt unbeschädigte Schiffe), Durchfall vom Kapitän (3 Schüsse gehen daneben), Kraken (versenkt ein Schiff). Ca. 2–3 pro Partie.
+
+Die gesamte Spiellogik läuft auf dem Server – auch Spiele gegen den Computer.
+
 Hinweis Free-Plan: Nach ca. 15 Minuten ohne Besucher schläft der Server ein; der erste Aufruf dauert dann etwa 30–60 Sekunden.
 
 ## Regeln (klassisch, wie das Hasbro-Brettspiel)

@@ -25,7 +25,7 @@
 <section class="screen" id="scrMenu">
   <div class="menu-hero">
     <h1>SCHIFFE<br><span>VERSENKEN</span></h1>
-    <p class="sub">Der Seekriegs-Klassiker · 1 gegen 1 online oder gegen den Computer</p>
+    <p class="sub">Der Seekriegs-Klassiker · online mit Freunden, im Turnier oder gegen den Computer</p>
   </div>
 
   <div class="panel menu-panel">
@@ -42,11 +42,28 @@
     <div class="fleet-preview" id="fleetPreview"></div>
 
     <div class="field" id="modeField">
-      <span>Spielmodus</span>
-      <div class="seg big-seg" id="segMode">
-        <button data-v="classic">⚓ Klassisch</button>
-        <button data-v="power">⚡ Mit Power-ups</button>
+      <span>Spielregeln</span>
+      <div class="opt-grid">
+        <div>
+          <small class="opt-lbl">Spieler</small>
+          <div class="seg big-seg" id="segSize">
+            <button data-v="2">⚔️ 2 Spieler</button>
+            <button data-v="3">🔱 3 Spieler</button>
+          </div>
+        </div>
+        <div>
+          <small class="opt-lbl">Modus</small>
+          <div class="seg big-seg" id="segMode">
+            <button data-v="classic">⚓ Klassisch</button>
+            <button data-v="power">⚡ Power-ups</button>
+          </div>
+        </div>
       </div>
+      <label class="switch-row">
+        <input type="checkbox" id="chkEvents">
+        <span class="switch"></span>
+        <span><b>🎲 Zufallsereignisse</b> <small>Eisberg, Piraten, Orkan, Durchfall vom Kapitän, Kraken</small></span>
+      </label>
       <p class="hint" id="modeHint"></p>
     </div>
 
@@ -68,7 +85,7 @@
         <button class="btn primary" id="btnCpu">Spiel starten</button>
       </div>
       <div class="mode-card">
-        <h3>🌐 Online 1 gegen 1</h3>
+        <h3>🌐 Online mit Freunden</h3>
         <button class="btn primary" id="btnHost">Raum erstellen &amp; Link teilen</button>
         <button class="btn gold" id="btnTourney">🏆 Turnier erstellen</button>
         <div class="join-row">
@@ -85,7 +102,7 @@
 <!-- LOBBY -->
 <section class="screen hidden" id="scrLobby">
   <div class="panel lobby">
-    <h2>Raum erstellt</h2>
+    <h2 id="lobbyTitle">Raum erstellt</h2>
     <div class="code-big" id="lobbyCode">-----</div>
     <p>Schick diesen Link an deinen Freund:</p>
     <div class="link-row">
@@ -95,7 +112,9 @@
     <button class="btn primary hidden" id="btnShare">📤 Link teilen</button>
     <div class="sonar"><div></div><div></div><div></div></div>
     <p class="muted" id="lobbyMode"></p>
-    <p class="muted">Warte auf Gegner …</p>
+    <div class="lobby-players" id="lobbyPlayers"></div>
+    <p class="muted" id="lobbyWait">Warte auf Gegner …</p>
+    <button class="btn gold hidden" id="btnFillBots">🤖 Mit Bot auffüllen &amp; starten</button>
     <button class="btn ghost" id="btnLobbyCancel">Abbrechen</button>
   </div>
 </section>
@@ -157,18 +176,7 @@
 <section class="screen hidden" id="scrBattle">
   <div class="status" id="status"></div>
   <div class="powerbar hidden" id="powerBar"></div>
-  <div class="battle">
-    <div class="side" id="sideMe">
-      <div class="plate" id="plateMe"></div>
-      <div id="myBoard"></div>
-      <div class="fleet-list" id="myFleet"></div>
-    </div>
-    <div class="side" id="sideEnemy">
-      <div class="plate" id="plateEnemy"></div>
-      <div id="enemyBoard"></div>
-      <div class="fleet-list" id="enemyFleet"></div>
-    </div>
-  </div>
+  <div class="battle" id="battle"></div>
   <div class="log-wrap panel">
     <div class="log" id="log"></div>
     <button class="btn ghost small" id="btnSurrender">Aufgeben</button>
@@ -180,6 +188,7 @@
   <div class="modal-box" id="modalBox"></div>
 </div>
 <div class="toast hidden" id="toast"></div>
+<div class="event-layer" id="eventLayer"></div>
 
 <script src="ships.js"></script>
 <script src="socket.io/socket.io.js" onerror="window.__noSocket=true"></script>
