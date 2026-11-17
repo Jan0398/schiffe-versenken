@@ -595,10 +595,26 @@
       renderSides();
       return 2400;
     }
-    // Dritter Spieler
-    if (m.sunk) { logAdd(`${seatName(by)} versenkt ein Schiff von ${seatName(t)}!`, 'l-sunk'); toast(`💥 ${seatName(by)} versenkt ein Schiff von ${seatName(t)}!`); }
-    else logAdd(`${seatName(by)} schießt auf ${seatName(t)}.`);
-    return 200;
+    // Dritter Spieler: sieht den Schuss mit
+    const O = G.opp[t];
+    if (!O || m.r == null || m.res == null) { logAdd(`${seatName(by)} schießt auf ${seatName(t)}.`); return 200; }
+    if (m.aimed) driftFx(O.bd, m.aimed, [m.r, m.c], m.siren ? '🎶' : '🎯');
+    if (!O.shots.has(K(m.r, m.c)) || O.shots.get(K(m.r, m.c)) === 'unknown') O.shots.set(K(m.r, m.c), m.res);
+    O.bd.ships.querySelectorAll(`.mark[data-k="${K(m.r, m.c)}"]`).forEach(e => e.remove());
+    const pre = `${seatName(by)} → ${seatName(t)}: ${coord(m.r, m.c)}`;
+    if (m.res === 'unknown') { setPeg(O.bd, m.r, m.c, 'unk', true); logAdd(`${pre} – Ergebnis unbekannt (EMP).`); return 300; }
+    setPeg(O.bd, m.r, m.c, m.res === 'miss' ? 'miss' : 'hit', true);
+    if (m.res === 'miss') { Sound.tone(500, 300, .12, .06, 'sine'); logAdd(`${pre} – daneben.`); return 350; }
+    if (m.res === 'hit') { Sound.tone(140, 60, .25, .2); shake(O.bd.board); logAdd(`${pre} – Treffer!`, 'l-hit'); renderSides(); return 450; }
+    if (m.ship && !O.known.some(x => x.id === m.ship.id)) {
+      O.known.push(m.ship);
+      setTimeout(() => O.bd.ships.appendChild(shipEl(m.ship.cc, m.ship.key, m.ship.r, m.ship.c, m.ship.h, 'sunk sunk-enemy', m.ship.id)), 450);
+      megaBoom(O.bd, m.ship);
+    }
+    logAdd(`${pre} – versenkt ${m.ship ? shipName(m.ship) : 'ein Schiff'}!`, 'l-sunk');
+    toast(`💥 ${seatName(by)} versenkt ${m.ship ? shipName(m.ship) : 'ein Schiff'} von ${seatName(t)}!`);
+    renderSides();
+    return 2400;
   }
 
   function onPower(m) {
@@ -651,8 +667,25 @@
       });
     }
     if (m.type === 'emp' && G.opp[t]) G.opp[t].blind = m.blind;
-    logAdd(`${seatName(by)} setzt ${def.icon} ${def.name} gegen ${seatName(t)} ein${m.sunk ? ` und versenkt ${m.sunk} Schiff${m.sunk > 1 ? 'e' : ''}!` : '.'}`, m.sunk ? 'l-sunk' : '');
+    logAdd(`${seatName(by)} setzt ${def.icon} ${def.name} gegen ${seatName(t)} ein!`, 'l-sunk');
     toast(`${def.icon} ${seatName(by)} setzt ${def.name} gegen ${seatName(t)} ein!`);
+    const O = G.opp[t];
+    if (O && m.shots && m.cells) {
+      return barrage(m, O.bd, sh => {
+        if (sh.res == null) return;
+        O.shots.set(K(sh.r, sh.c), sh.res);
+        if (sh.res === 'unknown') return setPeg(O.bd, sh.r, sh.c, 'unk', true);
+        setPeg(O.bd, sh.r, sh.c, sh.res === 'miss' ? 'miss' : 'hit', true);
+        if (sh.res === 'sunk' && sh.ship && !O.known.some(x => x.id === sh.ship.id)) {
+          O.known.push(sh.ship);
+          setTimeout(() => O.bd.ships.appendChild(shipEl(sh.ship.cc, sh.ship.key, sh.ship.r, sh.ship.c, sh.ship.h, 'sunk sunk-enemy', sh.ship.id)), 450);
+          megaBoom(O.bd, sh.ship); logAdd(`${seatName(by)} versenkt ${shipName(sh.ship)} von ${seatName(t)}!`, 'l-sunk');
+        }
+        renderSides();
+      });
+    }
+    if (O && m.type === 'emp') fxEmp(O.bd);
+    if (O && m.type === 'radar' && m.scan) fxRadar(O.bd, m.scan);
     renderSides();
     return 700;
   }

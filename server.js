@@ -189,6 +189,23 @@ function strike(me, tg, r, c) {
   else if (res === 'sunk') me.known.get(tg.seat).add(ship.id);
   return { r, c, res, ship };
 }
+// 3er-Modus: alle anderen Spieler sehen jeden Schuss mit
+function observe(room, me, tg, r, c, res, ship) {
+  const k = K(r, c), out = new Map();
+  for (const o of room.players) {
+    if (o === me || o === tg) continue;
+    const m = o.shots.get(tg.seat);
+    if (!m) continue;
+    if (!m.has(k)) {
+      m.set(k, res);
+      if (o.blind > 0) o.hidden.get(tg.seat).add(k);
+      else if (res === 'sunk' && ship) o.known.get(tg.seat).add(ship.id);
+    }
+    const blind = o.blind > 0;
+    out.set(o.seat, { res: blind ? 'unknown' : res, ship: !blind && res === 'sunk' && ship ? pub(ship) : null });
+  }
+  return out;
+}
 function deflect(me, tg, r, c) {
   const map = me.shots.get(tg.seat);
   const nb = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]].map(([dr, dc]) => [r + dr, c + dc]).filter(([a, b]) => inB(a, b));
@@ -221,11 +238,13 @@ function act(room, seat, a) {
     }
     again = !blind && !fake && s.res !== 'miss';
     if (s.res === 'sunk') anim = 2600;
+    const obs = observe(room, me, tg, r, c, s.res, s.ship);
     emitAll(room, 'shot', p => {
       const base = { by: seat, target: tg.seat, r, c, aimed, siren, drunkLeft: me.drunk };
       if (p === me) return { ...base, res: shown, ship: shown === 'sunk' ? pub(s.ship) : null };
       if (p === tg) return { ...base, res: s.res, shipId: s.ship ? s.ship.id : null };
-      return { by: seat, target: tg.seat, res: null, sunk: shown === 'sunk' };
+      const ov = obs.get(p.seat) || { res: null, ship: null };
+      return { ...base, res: ov.res, ship: ov.ship, observer: true };
     });
   } else if (a.kind === 'power') {
     const pw = me.powers.find(x => x.type === a.type && x.uses > 0);
@@ -246,13 +265,14 @@ function act(room, seat, a) {
     } else {
       const cells = areaCells(a.type, r, c, h);
       const shots = cells.map(([x, y]) => strike(me, tg, x, y)).filter(Boolean);
+      const obsAll = shots.map(x => observe(room, me, tg, x.r, x.c, x.res, x.ship));
       again = !blind && shots.some(x => x.res !== 'miss');
       anim = a.type === 'nuke' ? 3400 : 1500 + (shots.some(x => x.res === 'sunk') ? 1800 : 0);
       emitAll(room, 'power', p => {
         const base = { by: seat, target: tg.seat, type: a.type, cells };
         if (p === me) return { ...base, shots: shots.map(x => ({ r: x.r, c: x.c, res: blind ? 'unknown' : x.res, ship: !blind && x.res === 'sunk' ? pub(x.ship) : null })) };
         if (p === tg) return { ...base, shots: shots.map(x => ({ r: x.r, c: x.c, res: x.res, shipId: x.ship ? x.ship.id : null })) };
-        return { by: seat, target: tg.seat, type: a.type, sunk: blind ? 0 : shots.filter(x => x.res === 'sunk').length };
+        return { ...base, observer: true, shots: shots.map((x, i) => { const ov = obsAll[i].get(p.seat) || {}; return { r: x.r, c: x.c, res: ov.res, ship: ov.ship }; }) };
       });
     }
   } else return false;
