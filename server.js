@@ -20,8 +20,8 @@ const POWERS = ['emp', 'artillery', 'nuke', 'radar'];
 const POWER_USES = { artillery: 2 };
 const EMP_TURNS = 5;
 const DIARRHEA_SHOTS = 3;
-const EVENT_CFG = { chance: +(process.env.EV_CHANCE || 0.07), cooldown: +(process.env.EV_CD || 10), max: +(process.env.EV_MAX || 3) };
-const EVENTS = ['iceberg', 'pirates', 'storm', 'diarrhea', 'kraken'];
+const EVENT_CFG = { chance: +(process.env.EV_CHANCE || 0.08), cooldown: +(process.env.EV_CD || 9), max: +(process.env.EV_MAX || 3) };
+const EVENTS = ['iceberg', 'pirates', 'storm', 'diarrhea', 'kraken', 'whale', 'parrot', 'rum', 'repair', 'fog', 'siren', 'bottle', 'fish', 'mutiny', 'wave'];
 const MAX_TOURNEY = 16;
 const GRACE_MS = 120000;
 const BOT_NAMES = ['Bot Klabautermann', 'Bot Seebär', 'Bot Smutje', 'Bot Ahoi', 'Bot Blechbart', 'Bot Kielholer', 'Bot Sturmflut', 'Bot Leuchtturm'];
@@ -84,6 +84,7 @@ function resetPlayer(room, p) {
   p.ships = null; p.shots = new Map(); p.hidden = new Map(); p.known = new Map();
   for (const o of room.players) if (o !== p) { p.shots.set(o.seat, new Map()); p.hidden.set(o.seat, new Set()); p.known.set(o.seat, new Set()); }
   p.powers = []; p.used = []; p.blind = 0; p.drunk = 0; p.scans = []; p.out = false; p.place = null; p.rematch = false;
+  p.skip = 0; p.siren = 0; p.extra = 0; p.fish = 0; p.fishPending = null; p.fog = 0;
   p.ai = { useAt: 3 + rnd(9), turns: 0, queue: new Map(), clear: new Map() };
 }
 const nPowers = room => (room.powerups ? (room.size === 3 ? 2 : 1) : 0);
@@ -171,7 +172,11 @@ function nextSeat(room, seat) {
   for (let i = 1; i <= room.size; i++) { const s = (seat + i) % room.size; if (!room.players[s].out) return s; }
   return seat;
 }
-function emitTurn(room, again) { emitAll(room, 'turn', { turn: room.turn, again: !!again }); scheduleBot(room); }
+function emitTurn(room, again, extra = false) {
+  const fog = Object.fromEntries(room.players.map(p => [p.seat, p.fog || 0]));
+  emitAll(room, 'turn', { turn: room.turn, again: !!again, extra, fog });
+  scheduleBot(room);
+}
 
 function strike(me, tg, r, c) {
   const k = K(r, c), map = me.shots.get(tg.seat);
@@ -200,19 +205,31 @@ function act(room, seat, a) {
   if (a.kind === 'shoot') {
     let r = a.r, c = a.c, aimed = null;
     if (!Number.isInteger(r) || !Number.isInteger(c) || !inB(r, c) || me.shots.get(tg.seat).has(K(r, c))) return false;
-    if (me.drunk > 0) { me.drunk--; const d = deflect(me, tg, r, c); if (d) { aimed = [r, c]; [r, c] = d; } }
+    let siren = false;
+    if (me.siren > 0) {
+      me.siren = 0; siren = true;
+      const m = me.shots.get(tg.seat), free = [];
+      for (let x = 0; x < N; x++) for (let y = 0; y < N; y++) if (!m.has(K(x, y)) && !(x === r && y === c)) free.push([x, y]);
+      if (free.length) { aimed = [r, c]; [r, c] = pick(free); }
+    } else if (me.drunk > 0) { me.drunk--; const d = deflect(me, tg, r, c); if (d) { aimed = [r, c]; [r, c] = d; } }
     const s = strike(me, tg, r, c);
-    again = !blind && s.res !== 'miss';
+    let shown = blind ? 'unknown' : s.res, fake = false;
+    if (!blind && me.fish > 0 && s.res !== 'miss') {
+      me.fish = 0; fake = true; shown = 'miss';
+      me.fishPending = { t: tg.seat, k: K(r, c), at: room.turnCount };
+      if (s.res === 'sunk') me.known.get(tg.seat).delete(s.ship.id);
+    }
+    again = !blind && !fake && s.res !== 'miss';
     if (s.res === 'sunk') anim = 2600;
     emitAll(room, 'shot', p => {
-      const base = { by: seat, target: tg.seat, r, c, aimed, drunkLeft: me.drunk };
-      if (p === me) return { ...base, res: blind ? 'unknown' : s.res, ship: !blind && s.res === 'sunk' ? pub(s.ship) : null };
+      const base = { by: seat, target: tg.seat, r, c, aimed, siren, drunkLeft: me.drunk };
+      if (p === me) return { ...base, res: shown, ship: shown === 'sunk' ? pub(s.ship) : null };
       if (p === tg) return { ...base, res: s.res, shipId: s.ship ? s.ship.id : null };
-      return { by: seat, target: tg.seat, res: null, sunk: !blind && s.res === 'sunk' };
+      return { by: seat, target: tg.seat, res: null, sunk: shown === 'sunk' };
     });
   } else if (a.kind === 'power') {
     const pw = me.powers.find(x => x.type === a.type && x.uses > 0);
-    if (!pw || !room.powerups) return false;
+    if (!pw) return false;
     pw.uses--; me.used.push(a.type);
     const r = clamp(a.r | 0, 0, N - 1), c = clamp(a.c | 0, 0, N - 1), h = !!a.h;
     if (a.type === 'emp') {
@@ -257,17 +274,44 @@ function act(room, seat, a) {
   checkElim(room, tg);
   if (room.phase !== 'playing') return true;
   if (again && !me.out) emitTurn(room, true);
+  else if (me.extra > 0 && !me.out) { me.extra--; emitTurn(room, true, true); }
   else passTurn(room);
   return true;
+}
+function revealFish(room) {
+  for (const p of room.players) {
+    const f = p.fishPending;
+    if (!f || room.turnCount < f.at + 2) continue;
+    p.fishPending = null;
+    const res = p.shots.get(f.t).get(f.k);
+    if (!res) continue;
+    const o = room.players[f.t];
+    const [r, c] = unK(f.k);
+    const ship = o.ships.find(s => s.cells.includes(f.k));
+    if (res === 'sunk' && ship) p.known.get(f.t).add(ship.id);
+    emitTo(p, 'fishReveal', { target: f.t, r, c, res, ship: res === 'sunk' && ship ? pub(ship) : null });
+  }
 }
 
 function passTurn(room) {
   room.turn = nextSeat(room, room.turn);
   room.turnCount++;
+  for (const p of room.players) if (p.fog > 0) p.fog--;
+  revealFish(room);
   if (room.events && room.eventCount < EVENT_CFG.max && room.turnCount - room.lastEvent >= EVENT_CFG.cooldown && Math.random() < EVENT_CFG.chance) {
     triggerEvent(room);
     if (room.phase !== 'playing') return;
     if (room.players[room.turn].out) room.turn = nextSeat(room, room.turn);
+  }
+  let guard = 0;
+  while (room.phase === 'playing' && room.players[room.turn].skip > 0 && alive(room).length > 1 && guard++ < room.size) {
+    const p = room.players[room.turn];
+    p.skip--;
+    emitAll(room, 'skipped', { seat: p.seat });
+    room.animUntil = Math.max(room.animUntil, Date.now()) + 1500;
+    room.turn = nextSeat(room, room.turn);
+    room.turnCount++;
+    revealFish(room);
   }
   emitTurn(room, false);
 }
@@ -374,6 +418,116 @@ function applyEvent(room, type, P) {
     }
     return false;
   }
+  if (type === 'whale') {
+    const r0 = rnd(N - 2), c0 = rnd(N - 2), occupied = [];
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+      const k = K(r0 + i, c0 + j);
+      if (P.ships.some(sh => !sh.sunk && sh.cells.includes(k) && !sh.hits.has(k))) occupied.push([r0 + i, c0 + j]);
+    }
+    botHint(room, P, occupied);
+    emitAll(room, 'event', p => p === P ? { type, seat: P.seat, area: [r0, c0] } : { type, seat: P.seat, area: [r0, c0], occupied });
+    return true;
+  }
+  if (type === 'parrot') {
+    const cand = [];
+    P.ships.forEach(sh => { if (!sh.sunk) sh.cells.forEach(k => { if (!sh.hits.has(k)) cand.push(k); }); });
+    if (!cand.length) return false;
+    const cell = unK(pick(cand));
+    botHint(room, P, [cell]);
+    emitAll(room, 'event', { type, seat: P.seat, cell });
+    return true;
+  }
+  if (type === 'rum') {
+    if (P.skip > 0 || alive(room).length < 2) return false;
+    P.skip = 1;
+    emitAll(room, 'event', { type, seat: P.seat });
+    return true;
+  }
+  if (type === 'repair') {
+    const cand = P.ships.filter(sh => !sh.sunk && sh.hits.size > 0);
+    if (!cand.length) return false;
+    const ship = pick(cand), k = pick([...ship.hits]);
+    ship.hits.delete(k);
+    for (const o of room.players) if (o !== P) {
+      o.shots.get(P.seat).delete(k); o.hidden.get(P.seat).delete(k);
+      if (o.fishPending && o.fishPending.t === P.seat && o.fishPending.k === k) o.fishPending = null;
+    }
+    emitAll(room, 'event', p => ({ type, seat: P.seat, cell: unK(k), shipId: p === P ? ship.id : undefined }));
+    return true;
+  }
+  if (type === 'fog') {
+    if (P.fog > 0) return false;
+    P.fog = 3 * room.size;
+    emitAll(room, 'event', { type, seat: P.seat, turns: 3 });
+    return true;
+  }
+  if (type === 'siren') {
+    if (P.siren > 0) return false;
+    P.siren = 1;
+    emitAll(room, 'event', { type, seat: P.seat });
+    return true;
+  }
+  if (type === 'bottle') {
+    const bonus = rnd(2) ? 'extra' : 'radar';
+    if (bonus === 'radar') { const r = P.powers.find(x => x.type === 'radar'); if (r) r.uses++; else P.powers.push({ type: 'radar', uses: 1 }); }
+    else P.extra = (P.extra || 0) + 1;
+    emitAll(room, 'event', { type, seat: P.seat, bonus });
+    return true;
+  }
+  if (type === 'fish') {
+    if (P.fish > 0 || P.fishPending) return false;
+    P.fish = 1;
+    emitAll(room, 'event', { type, seat: P.seat });
+    return true;
+  }
+  if (type === 'mutiny') {
+    const movers = shuffle(P.ships.filter(sh => !sh.sunk)).slice(0, 2);
+    if (!movers.length || P.ships.filter(sh => !sh.sunk).length < 2) return false;
+    const moverCells = new Set(movers.flatMap(sh => sh.cells));
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const blocked = new Set([...shotAt(room, P)].filter(k => !moverCells.has(k)));
+      P.ships.filter(sh => !movers.includes(sh)).forEach(sh => sh.cells.forEach(k => blocked.add(k)));
+      const plan = []; let ok = true;
+      for (const sh of movers) {
+        const pl = randomPlacement(sh.len, blocked);
+        if (!pl) { ok = false; break; }
+        pl.cells.forEach(k => blocked.add(k)); plan.push([sh, pl]);
+      }
+      if (!ok) continue;
+      const cleared = [];
+      for (const o of room.players) if (o !== P) {
+        const m = o.shots.get(P.seat);
+        for (const k of moverCells) if (m.has(k)) { m.delete(k); o.hidden.get(P.seat).delete(k); cleared.push(k); }
+        if (o.fishPending && o.fishPending.t === P.seat && moverCells.has(o.fishPending.k)) o.fishPending = null;
+      }
+      for (const [sh, pl] of plan) {
+        const idx = sh.cells.map((k, i) => sh.hits.has(k) ? i : -1).filter(i => i >= 0);
+        Object.assign(sh, { r: pl.r, c: pl.c, h: pl.h, cells: pl.cells });
+        sh.hits = new Set(idx.map(i => pl.cells[i]));
+      }
+      emitAll(room, 'event', p => p === P
+        ? { type, seat: P.seat, ships: P.ships.map(sh => ({ ...pub(sh), hits: [...sh.hits].map(unK), sunk: sh.sunk })), moved: movers.map(sh => sh.id) }
+        : { type, seat: P.seat, cleared: [...new Set(cleared)].map(unK) });
+      return true;
+    }
+    return false;
+  }
+  if (type === 'wave') {
+    const row = rnd(2) === 0, idx = rnd(N);
+    const line = Array.from({ length: N }, (_, i) => row ? K(idx, i) : K(i, idx));
+    const hits = [], wrecks = [];
+    for (const sh of P.ships) {
+      if (sh.sunk) continue;
+      const inter = sh.cells.filter(k => line.includes(k) && !sh.hits.has(k));
+      if (!inter.length) continue;
+      const k = pick(inter);
+      sh.hits.add(k); hits.push([...unK(k), sh.id]);
+      if (sh.hits.size >= sh.len) { sh.sunk = true; revealWreck(room, P, sh); wrecks.push(pub(sh)); }
+    }
+    emitAll(room, 'event', p => p === P ? { type, seat: P.seat, row, idx, hits, wrecks } : { type, seat: P.seat, row, idx, wrecks, count: hits.length });
+    checkElim(room, P);
+    return true;
+  }
   if (type === 'diarrhea') {
     if (P.drunk > 0) return false;
     P.drunk = DIARRHEA_SHOTS;
@@ -384,10 +538,16 @@ function applyEvent(room, type, P) {
 }
 
 /* ================= Bots ================= */
+function botHint(room, P, cells) {
+  for (const o of room.players) if (o !== P && o.bot && o.ai) {
+    if (!o.ai.queue.has(P.seat)) { o.ai.queue.set(P.seat, new Set()); o.ai.clear.set(P.seat, new Set()); }
+    cells.forEach(([r, c]) => o.ai.queue.get(P.seat).add(K(r, c)));
+  }
+}
 function botView(me, tg) {
   const shots = new Map();
   const hid = me.hidden.get(tg.seat);
-  for (const [k, v] of me.shots.get(tg.seat)) shots.set(k, hid.has(k) ? 'unk' : v);
+  for (const [k, v] of me.shots.get(tg.seat)) shots.set(k, hid.has(k) ? 'unk' : (me.fishPending && me.fishPending.t === tg.seat && me.fishPending.k === k) ? 'miss' : v);
   const known = me.known.get(tg.seat);
   const sunkShips = tg.ships.filter(s => known.has(s.id));
   const sunkCells = new Set(sunkShips.flatMap(s => s.cells));
@@ -519,7 +679,7 @@ function syncState(room, seat) {
   const shots = {}, known = {};
   for (const [t, m] of me.shots) {
     const hid = me.hidden.get(t);
-    shots[t] = [...m].map(([k, v]) => [...unK(k), hid.has(k) && !over ? 'unknown' : v]);
+    shots[t] = [...m].map(([k, v]) => [...unK(k), over ? v : hid.has(k) ? 'unknown' : (me.fishPending && me.fishPending.t === t && me.fishPending.k === k) ? 'miss' : v]);
     const o = room.players[t];
     known[t] = o.ships ? o.ships.filter(s => over || o.out || me.known.get(t).has(s.id)).map(pub) : [];
   }
@@ -529,6 +689,8 @@ function syncState(room, seat) {
     ...matchedInfo(room, me), phase: room.phase, turn: room.turn, winner: room.winner,
     myShips: me.ships ? me.ships.map(s => ({ ...pub(s), hits: [...s.hits].map(unK), sunk: s.sunk })) : null,
     myPowers: me.powers, blind: me.blind, drunk: me.drunk, scans: me.scans,
+    siren: me.siren, fish: me.fish || (me.fishPending ? 1 : 0), extra: me.extra, skip: me.skip,
+    fog: Object.fromEntries(room.players.map(p => [p.seat, p.fog || 0])),
     shots, known, incoming: [...incoming].map(([k, v]) => [...unK(k), v]),
     places: room.players.map(p => p.place), myRematch: me.rematch,
   };

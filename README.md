@@ -25,7 +25,7 @@ Spielmodi: **Klassisch** oder **Mit Power-ups** (EMP, Artilleriebeschuss, Nuke, 
 
 **3 Spieler:** Jeder gegen jeden – pro Schuss frei wählbar, auf welchen Gegner. Gegen 2 Computer oder online (fehlender 3. Platz per Bot auffüllbar). Mit Power-ups: 2 pro Spieler.
 
-**Zufallsereignisse** (optional): Eisberg (beschädigt ein Schiff), Piratenangriff (kapert ein gegnerisches Schiff), Orkanböen (versetzt unbeschädigte Schiffe), Durchfall vom Kapitän (3 Schüsse gehen daneben), Kraken (versenkt ein Schiff). Ca. 2–3 pro Partie.
+**Zufallsereignisse** (optional): Eisberg (beschädigt ein Schiff), Piratenangriff (kapert ein gegnerisches Schiff), Orkanböen (versetzt unbeschädigte Schiffe), Durchfall vom Kapitän (3 Schüsse gehen daneben), Kraken (versenkt ein Schiff), Wal-Sichtung (deckt 3×3 auf), Papagei (verrät ein Schiffsfeld), Rum-Party (Zug aussetzen), Reparaturtrupp (repariert 1 Treffer), Nebel (Stecker 3 Runden unsichtbar), Sirenen (nächster Schuss landet zufällig), Flaschenpost (Extraschuss oder Radar), Fischschwarm (Treffer wird verspätet gemeldet), Meuterei (2 Schiffe ankern um), Monsterwelle (beschädigt Schiffe in einer Reihe/Spalte). Ca. 2–3 pro Partie.
 
 Die gesamte Spiellogik läuft auf dem Server – auch Spiele gegen den Computer.
 

@@ -77,6 +77,16 @@
     pirates() { this.tone(220, 220, .35, .18, 'sawtooth'); this.tone(277, 277, .35, .18, 'sawtooth', .35); this.tone(330, 330, .6, .18, 'sawtooth', .7); [1.4, 1.7, 2.0].forEach(t => { this.noise(.4, { type: 'lowpass', freq: 900, freqEnd: 100, gain: .6, delay: t }); }); },
     storm() { this.noise(3.2, { type: 'bandpass', freq: 400, freqEnd: 1600, q: .6, gain: .5, attack: .8 }); this.noise(2.5, { type: 'bandpass', freq: 900, freqEnd: 300, q: .8, gain: .3, attack: .5, delay: .6 }); },
     diarrhea() { [0, .18, .36].forEach((t, i) => this.tone(180 - i * 30, 60, .25, .22, 'sawtooth', t)); this.tone(90, 40, .9, .25, 'square', .7); this.noise(.6, { type: 'lowpass', freq: 300, gain: .3, delay: 1.6 }); },
+    whale() { this.tone(180, 90, 1.4, .3, 'sine'); this.tone(240, 120, 1.2, .2, 'sine', .3); this.noise(1.2, { type: 'highpass', freq: 1500, gain: .3, attack: .2, delay: 1.2 }); },
+    parrot() { [0, .15, .3, .5].forEach((t, i) => this.tone(1800 + i * 300, 900, .12, .15, 'square', t)); },
+    rum() { [523, 587, 659, 587, 523].forEach((f, i) => this.tone(f, f, .18, .12, 'triangle', i * .18)); this.tone(200, 120, .3, .2, 'sine', 1.1); },
+    repair() { [0, .25, .5, .75].forEach(t => { this.noise(.08, { type: 'highpass', freq: 3000, gain: .5, delay: t }); this.tone(900, 700, .06, .1, 'square', t); }); },
+    fog() { this.noise(3, { type: 'lowpass', freq: 300, freqEnd: 150, gain: .3, attack: 1 }); this.tone(110, 108, 2.5, .12, 'sine', .3); },
+    siren() { [659, 784, 880, 784, 659, 523].forEach((f, i) => this.tone(f, f * 1.01, .35, .1, 'sine', i * .25)); },
+    bottle() { this.tone(800, 400, .15, .2, 'square'); this.noise(.3, { type: 'highpass', freq: 2000, gain: .3, delay: .1 }); [784, 988, 1175].forEach((f, i) => this.tone(f, f, .2, .12, 'triangle', .5 + i * .12)); },
+    fish() { for (let i = 0; i < 10; i++) this.tone(600 + rand(900), 300, .08, .06, 'sine', i * .12); },
+    mutiny() { [0, .3, .6].forEach(t => { this.noise(.15, { type: 'bandpass', freq: 2500, q: 3, gain: .4, delay: t }); this.tone(1400, 900, .1, .1, 'square', t); }); this.tone(150, 100, .6, .25, 'sawtooth', .9); },
+    wave() { this.noise(3, { type: 'lowpass', freq: 600, freqEnd: 150, gain: .7, attack: .8 }); this.noise(1.5, { type: 'highpass', freq: 1500, gain: .25, attack: .3, delay: 1 }); },
     kraken() { this.tone(55, 30, 2.5, .5, 'sawtooth'); this.tone(82, 40, 2.2, .3, 'sine', .2); this.noise(2.4, { type: 'lowpass', freq: 500, freqEnd: 60, gain: .55, attack: .6, delay: .8 }); },
   };
   function updateSoundBtn() { $('btnSound').textContent = Sound.on ? '🔊' : '🔇'; }
@@ -230,6 +240,16 @@
     storm: { icon: '🌪️', title: 'ORKANBÖEN!', txt: s => `Ein Orkan wirbelt die unbeschädigten Schiffe von ${s} durcheinander!` },
     diarrhea: { icon: '🚽', title: 'DURCHFALL VOM KAPITÄN!', txt: s => `Der Kapitän von ${s} muss dringend … ein Aushilfsschütze übernimmt: die nächsten 3 Schüsse gehen ein Feld daneben!` },
     kraken: { icon: '🐙', title: 'DER KRAKEN!', txt: s => `Ein Riesenkraken zieht ein Schiff von ${s} in die Tiefe!` },
+    whale: { icon: '🐋', title: 'WAL-SICHTUNG!', txt: s => `Ein Wal taucht bei ${s} auf – seine Fontäne verrät ein 3×3-Gebiet!` },
+    parrot: { icon: '🦜', title: 'PLAPPERNDER PAPAGEI!', txt: s => `Der Papagei von ${s} kreischt eine Schiffsposition heraus!` },
+    rum: { icon: '🍺', title: 'RUM-PARTY!', txt: s => `Die Mannschaft von ${s} feiert – ${s} setzt den nächsten Zug aus!` },
+    repair: { icon: '🛠️', title: 'REPARATURTRUPP!', txt: s => `Die Werft flickt ein beschädigtes Schiff von ${s} – ein Treffer ist repariert!` },
+    fog: { icon: '🌫️', title: 'DICHTER NEBEL!', txt: s => `Nebel zieht über das Gebiet von ${s} – 3 Runden lang sieht niemand die Stecker!` },
+    siren: { icon: '🧜', title: 'SIRENENGESANG!', txt: s => `Sirenen verzaubern ${s} – der nächste Schuss landet irgendwo!` },
+    bottle: { icon: '🍾', title: 'FLASCHENPOST!', txt: (s, f, b) => `${s} findet eine Flaschenpost: ${b === 'radar' ? 'ein Radar-Power-up!' : 'einen Extraschuss!'}` },
+    fish: { icon: '🐟', title: 'FISCHSCHWARM!', txt: s => `Ein Fischschwarm stört das Sonar von ${s} – der nächste Treffer wird erst später erkannt!` },
+    mutiny: { icon: '⚔️', title: 'MEUTEREI!', txt: s => `Tumult an Bord bei ${s}! Zwei Schiffe lichten die Anker und verschwinden an neue Plätze.` },
+    wave: { icon: '🌊', title: 'MONSTERWELLE!', txt: s => `Eine Monsterwelle rollt durch das Gebiet von ${s}!` },
   };
 
   const P = { placed: {}, sel: null, h: true, hover: null, board: null, locked: false, powers: [] };
@@ -355,8 +375,9 @@
       incoming: new Map(), opp: {}, order: S.seats.filter(s => s.seat !== S.mySeat).map(s => s.seat),
       turn: null, myTurn: false, busy: false, over: false, out: false, log: [], stats: { shots: 0, hits: 0 },
       powers: [], arm: null, armH: true, blind: 0, drunk: 0, animUntil: 0, lastHover: null,
+      fog: {}, siren: 0, fish: 0, extra: 0, skip: 0,
     };
-    for (const s of G.order) G.opp[s] = { seat: s, shots: new Map(), known: [], scans: [], bd: null, blind: 0, drunk: 0 };
+    for (const s of G.order) G.opp[s] = { seat: s, shots: new Map(), known: [], scans: [], bd: null, blind: 0, drunk: 0, skip: 0 };
   }
   function shipCellsArr(s) { return Array.from({ length: s.len }, (_, i) => s.h ? K(s.r, s.c + i) : K(s.r + i, s.c)); }
 
@@ -403,6 +424,7 @@
   function renderSides() {
     if (!G) return;
     const badges = (blind, drunk, seat) => (blind > 0 ? ` <span class="emp-badge">⚡ blind (${blind})</span>` : '') + (drunk > 0 ? ` <span class="drunk-badge">🚽 ${drunk}</span>` : '') +
+      ((seat === S.mySeat ? G.skip : (G.opp[seat] || {}).skip) ? ' <span class="drunk-badge">🍺 setzt aus</span>' : '') +
       (S.seats[seat] && S.seats[seat].online === false ? ' <span class="off">● offline</span>' : '') + (S.seats[seat] && S.seats[seat].bot ? ' <i class="bot">BOT</i>' : '');
     const meSide = $('side-me');
     const myLeft = G.ships.filter(s => !s.sunk).length;
@@ -435,6 +457,9 @@
       txt = G.again ? '🔥 Treffer! Du darfst nochmal schießen!' : (S.msize === 3 ? '🎯 Du bist am Zug – schieß auf einen deiner Gegner!' : '🎯 Du bist am Zug – wähle ein Ziel im Feindgebiet!');
       if (G.blind > 0) txt = `⚡ Du schießt blind! (EMP – noch ${G.blind} ${G.blind === 1 ? 'Zug' : 'Züge'})`;
       if (G.drunk > 0) txt += ` · 🚽 Aushilfsschütze: dein Schuss geht daneben (noch ${G.drunk})`;
+      if (G.siren) txt += ' · 🧜 Sirenen: dieser Schuss landet irgendwo!';
+      if (G.fish) txt += ' · 🐟 Fischschwarm stört dein Sonar';
+      if (G.extra) txt += ' · 🍾 Extraschuss auf Vorrat';
     } else txt = G.again ? `🔥 ${seatName(G.turn)} hat getroffen und schießt nochmal …` : `⏳ ${seatName(G.turn)} ist am Zug …`;
     st.textContent = txt;
     $('side-me').style.opacity = mine || G.out ? .8 : 1;
@@ -457,7 +482,7 @@
   /* ----- Power-ups ----- */
   function renderPowerBar() {
     const bar = $('powerBar');
-    if (!G || !S.powerups || !G.powers.length) { bar.classList.add('hidden'); return; }
+    if (!G || !G.powers.length) { bar.classList.add('hidden'); return; }
     bar.classList.remove('hidden');
     const can = G.myTurn && !G.busy && !G.over;
     bar.innerHTML = G.powers.map((p, i) => {
@@ -529,17 +554,21 @@
     const by = m.by, t = m.target;
     if (G.opp[by] && G.opp[by].drunk > 0) G.opp[by].drunk--;
     if (G.opp[by] && G.opp[by].blind > 0) G.opp[by].blind--;
+    if (G.opp[t]) G.opp[t].bd.ships.querySelectorAll(`.mark[data-k="${K(m.r, m.c)}"]`).forEach(e => e.remove());
     if (by === S.mySeat) {
       clearTimeout(G.busyT);
       const O = G.opp[t];
       G.drunk = m.drunkLeft || 0;
+      if (m.siren) G.siren = 0;
+      if (m.res === 'hit' || m.res === 'sunk') G.fish = 0;
+      for (const s of G.order) clearMarks(G.opp[s], 'whale');
       if (G.blind > 0) G.blind--;
       O.shots.set(K(m.r, m.c), m.res); G.stats.shots++;
-      if (m.aimed) driftFx(O.bd, m.aimed, [m.r, m.c]);
+      if (m.aimed) driftFx(O.bd, m.aimed, [m.r, m.c], m.siren ? '🎶' : '🎯');
       if (m.res === 'unknown') { setPeg(O.bd, m.r, m.c, 'unk', true); Sound.tone(300, 120, .2, .1, 'sawtooth'); logAdd(`Du → ${seatName(t)}: ${coord(m.r, m.c)} – Ergebnis unbekannt (EMP).`); updateEmp(); return 500; }
       if (m.res !== 'miss') G.stats.hits++;
       setPeg(O.bd, m.r, m.c, m.res === 'miss' ? 'miss' : 'hit', true);
-      const pre = `Du${S.msize === 3 ? ' → ' + seatName(t) : ''}: ${coord(m.r, m.c)}${m.aimed ? ' (verzogen!)' : ''}`;
+      const pre = `Du${S.msize === 3 ? ' → ' + seatName(t) : ''}: ${coord(m.r, m.c)}${m.siren ? ' (verzaubert!)' : m.aimed ? ' (verzogen!)' : ''}`;
       if (m.res === 'miss') { Sound.splash(); logAdd(`${pre} – daneben.`); updateEmp(); renderSides(); return 450; }
       if (m.res === 'hit') { Sound.boom(); shake(O.bd.board); logAdd(`${pre} – Treffer!`, 'l-hit'); updateEmp(); renderSides(); return 500; }
       O.known.push(m.ship);
@@ -553,7 +582,7 @@
     }
     if (t === S.mySeat) {
       const name = seatName(by);
-      if (m.aimed) driftFx(G.bd, m.aimed, [m.r, m.c]);
+      if (m.aimed) driftFx(G.bd, m.aimed, [m.r, m.c], m.siren ? '🎶' : '🎯');
       const ship = m.shipId ? myShipById(m.shipId) : null;
       G.incoming.set(K(m.r, m.c), m.res);
       setPeg(G.bd, m.r, m.c, m.res === 'miss' ? 'miss' : 'hit', true);
@@ -578,6 +607,7 @@
     if (G.opp[by] && G.opp[by].blind > 0) G.opp[by].blind--;
     if (by === S.mySeat) {
       clearTimeout(G.busyT);
+      for (const s of G.order) clearMarks(G.opp[s], 'whale');
       const pw = G.powers.find(p => p.type === m.type && p.uses > 0); if (pw) pw.uses--;
       if (G.blind > 0) G.blind--;
       const O = G.opp[t];
@@ -657,8 +687,14 @@
     const E = EVENTS[m.type], me = m.seat === S.mySeat;
     const who = me ? 'dir' : seatName(m.seat);
     const whoNom = me ? 'dir' : seatName(m.seat);
-    let txt = m.type === 'pirates' ? E.txt(me ? 'dich' : seatName(m.seat), m.from === S.mySeat ? 'dir' : seatName(m.from)) : E.txt(whoNom);
-    if (me && m.type === 'diarrhea') txt = 'Dein Kapitän muss dringend … ein Aushilfsschütze übernimmt: deine nächsten 3 Schüsse gehen ein Feld daneben!';
+    const subj = me ? 'dir' : seatName(m.seat);
+    let txt = m.type === 'pirates' ? E.txt(me ? 'dich' : seatName(m.seat), m.from === S.mySeat ? 'dir' : seatName(m.from))
+      : m.type === 'bottle' ? E.txt(me ? 'Du' : seatName(m.seat), null, m.bonus) : E.txt(whoNom);
+    const own = { diarrhea: 'Dein Kapitän muss dringend … ein Aushilfsschütze übernimmt: deine nächsten 3 Schüsse gehen ein Feld daneben!',
+      rum: 'Deine Mannschaft feiert eine Rum-Party – du setzt den nächsten Zug aus!', siren: 'Sirenen verzaubern dich – dein nächster Schuss landet irgendwo auf dem Zielfeld!',
+      fish: 'Ein Fischschwarm stört dein Sonar – dein nächster Treffer wird dir zuerst als „Wasser“ gemeldet!',
+      whale: 'Ein Wal taucht bei dir auf – deine Gegner sehen kurz, was in diesem Gebiet liegt!', parrot: 'Dein Papagei plappert eine deiner Schiffspositionen aus!' };
+    if (me && own[m.type]) txt = own[m.type];
     eventBanner(m.type, txt, me || m.from === S.mySeat);
     logAdd(`${E.icon} ${E.title} ${txt}`, 'l-event');
     const bd = boardOf(m.seat);
@@ -728,6 +764,118 @@
       }
       return 3800;
     }
+    if (m.type === 'whale') {
+      Sound.whale();
+      const [r0, c0] = m.area;
+      if (bd) whaleFx(bd, r0, c0);
+      if (!me && G.opp[m.seat]) setTimeout(() => {
+        const O = G.opp[m.seat];
+        clearMarks(O, 'whale');
+        for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+          const occ = m.occupied.some(([a, b]) => a === r0 + i && b === c0 + j);
+          addMark(O, r0 + i, c0 + j, occ ? 'whale occ' : 'whale empty', occ ? '🐋' : '');
+        }
+        logAdd(`🐋 Wal-Sichtung bei ${seatName(m.seat)}: ${m.occupied.length ? m.occupied.map(([a, b]) => coord(a, b)).join(', ') : 'keine Schiffe'} im Gebiet ${coord(r0, c0)}–${coord(r0 + 2, c0 + 2)}.`, 'l-event');
+      }, 1500);
+      return 3600;
+    }
+    if (m.type === 'parrot') {
+      Sound.parrot();
+      if (bd) parrotFx(bd, m.cell);
+      if (!me && G.opp[m.seat]) setTimeout(() => { addMark(G.opp[m.seat], m.cell[0], m.cell[1], 'parrot', '🦜'); logAdd(`🦜 Der Papagei verrät: ${seatName(m.seat)} hat ein Schiff auf ${coord(m.cell[0], m.cell[1])}!`, 'l-event'); }, 1600);
+      else if (me) setTimeout(() => logAdd(`🦜 Dein Papagei hat ${coord(m.cell[0], m.cell[1])} verraten.`, 'l-event'), 1600);
+      return 3400;
+    }
+    if (m.type === 'rum') {
+      Sound.rum();
+      if (bd) rumFx(bd);
+      if (me) G.skip = 1; else if (G.opp[m.seat]) G.opp[m.seat].skip = 1;
+      renderSides();
+      return 3400;
+    }
+    if (m.type === 'repair') {
+      Sound.repair();
+      const [r, c] = m.cell;
+      if (bd) repairFx(bd, r, c);
+      setTimeout(() => {
+        if (me) { const ship = myShipById(m.shipId); if (ship) ship.hits.delete(K(r, c)); G.incoming.delete(K(r, c)); clearPeg(bd, r, c); }
+        else if (G.opp[m.seat]) { G.opp[m.seat].shots.delete(K(r, c)); clearPeg(G.opp[m.seat].bd, r, c); logAdd(`🛠️ ${coord(r, c)} bei ${seatName(m.seat)} ist wieder repariert – du kannst nochmal draufschießen!`, 'l-event'); }
+        renderSides();
+      }, 1400);
+      return 3200;
+    }
+    if (m.type === 'fog') {
+      Sound.fog();
+      G.fog[m.seat] = 1; applyFog();
+      return 3000;
+    }
+    if (m.type === 'siren') {
+      Sound.siren();
+      if (me) { G.siren = 1; for (const s of G.order) sirenFx(G.opp[s].bd); } else sirenFx(G.bd);
+      setTurnUI();
+      return 3400;
+    }
+    if (m.type === 'bottle') {
+      Sound.bottle();
+      if (bd) bottleFx(bd);
+      if (me) {
+        if (m.bonus === 'radar') { const r = G.powers.find(p => p.type === 'radar'); if (r) { r.uses++; r.max = Math.max(r.max || 1, r.uses); } else G.powers.push({ type: 'radar', uses: 1, max: 1 }); renderPowerBar(); }
+        else G.extra = (G.extra || 0) + 1;
+      }
+      setTurnUI();
+      return 3200;
+    }
+    if (m.type === 'fish') {
+      Sound.fish();
+      if (me) { G.fish = 1; for (const s of G.order) fishFx(G.opp[s].bd); }
+      else fishFx(G.bd);
+      setTurnUI();
+      return 3200;
+    }
+    if (m.type === 'mutiny') {
+      Sound.mutiny();
+      if (bd) mutinyFx(bd);
+      if (me) {
+        const moved = new Set(m.moved);
+        bd.ships.querySelectorAll('.ship').forEach(e => { if (moved.has(e.dataset.id)) e.classList.add('blown'); });
+        setTimeout(() => {
+          for (const ns of m.ships) {
+            const sh = myShipById(ns.id); if (!sh || !moved.has(sh.id)) continue;
+            sh.cells.forEach(k => { if (sh.hits.has(k)) { const [r, c] = k.split(',').map(Number); clearPeg(bd, r, c); G.incoming.delete(k); } });
+            Object.assign(sh, { r: ns.r, c: ns.c, h: ns.h, cells: shipCellsArr(ns) });
+            sh.hits = new Set(ns.hits.map(([r, c]) => K(r, c)));
+          }
+          bd.ships.innerHTML = '';
+          for (const sh of G.ships) bd.ships.appendChild(shipEl(sh.cc, sh.key, sh.r, sh.c, sh.h, (sh.sunk ? 'sunk' : '') + (moved.has(sh.id) ? ' landed' : ''), sh.id));
+          for (const [k, v] of G.incoming) { const [r, c] = k.split(',').map(Number); setPeg(bd, r, c, v === 'miss' ? 'miss' : 'hit'); }
+          for (const sh of G.ships) for (const k of sh.hits) { const [r, c] = k.split(',').map(Number); setPeg(bd, r, c, 'hit'); }
+        }, 1500);
+      } else if (G.opp[m.seat]) {
+        setTimeout(() => {
+          const O = G.opp[m.seat];
+          for (const [r, c] of m.cleared || []) { O.shots.delete(K(r, c)); clearPeg(O.bd, r, c); }
+          if ((m.cleared || []).length) logAdd(`⚔️ Die getroffenen Schiffe von ${seatName(m.seat)} sind weg – deine Treffer dort sind verschwunden!`, 'l-event');
+        }, 1500);
+      }
+      return 3600;
+    }
+    if (m.type === 'wave') {
+      Sound.wave();
+      if (bd) waveFx(bd, m.row, m.idx);
+      setTimeout(() => {
+        if (me) {
+          for (const [r, c, id] of m.hits) { const sh = myShipById(id); if (sh) sh.hits.add(K(r, c)); setPeg(bd, r, c, 'hit', true); }
+          for (const w of m.wrecks) { const sh = myShipById(w.id); if (sh) { sh.sunk = true; const se = bd.ships.querySelector(`[data-id="${w.id}"]`); if (se) se.classList.add('sunk'); megaBoom(bd, sh); } }
+          if (m.hits.length) shake(bd.board);
+          logAdd(m.hits.length ? `🌊 Die Welle hat ${m.hits.length} deiner Schiffe beschädigt!` : '🌊 Glück gehabt – die Welle hat keins deiner Schiffe erwischt.', 'l-event');
+        } else {
+          for (const w of m.wrecks) revealWreckOn(m.seat, w);
+          logAdd(`🌊 Die Welle trifft ${m.count} Schiff${m.count === 1 ? '' : 'e'} von ${seatName(m.seat)}.`, 'l-event');
+        }
+        renderSides();
+      }, 1300);
+      return 3600 + (m.wrecks && m.wrecks.length ? 1500 : 0);
+    }
     if (m.type === 'diarrhea') {
       Sound.diarrhea();
       if (me) { G.drunk = m.shots; for (const s of G.order) diarrheaFx(G.opp[s].bd); }
@@ -736,6 +884,19 @@
       return 3500;
     }
     return 3000;
+  }
+  function addMark(O, r, c, cls, html) {
+    const d = el('div', 'mark ' + cls, html);
+    Object.assign(d.style, { left: c * 10 + '%', top: r * 10 + '%' });
+    d.dataset.k = K(r, c);
+    O.bd.ships.appendChild(d);
+  }
+  function clearMarks(O, cls) { O.bd.ships.querySelectorAll('.mark.' + cls).forEach(e => e.remove()); }
+  function clearPeg(bd, r, c) { const p = bd.peg(r, c); p.className = 'peg'; p.innerHTML = ''; bd.cell(r, c).classList.remove('shot'); }
+  function applyFog() {
+    if (!G) return;
+    G.bd.board.classList.toggle('fog', (G.fog[S.mySeat] || 0) > 0);
+    for (const s of G.order) G.opp[s].bd.board.classList.toggle('fog', (G.fog[s] || 0) > 0);
   }
   function revealWreckOn(seat, w) {
     const O = G.opp[seat]; if (!O) return;
@@ -900,8 +1061,8 @@
     Object.assign(d.style, { left: c * 10 + '%', top: r * 10 + '%', width: '10%', height: '10%' });
     bd.fx.appendChild(d); setTimeout(() => d.remove(), 700);
   }
-  function driftFx(bd, [ar, ac], [r, c]) {
-    const d = el('div', 'fx-drift', '🎯');
+  function driftFx(bd, [ar, ac], [r, c], icon = '🎯') {
+    const d = el('div', 'fx-drift', icon);
     Object.assign(d.style, { left: ac * 10 + '%', top: ar * 10 + '%' });
     d.style.setProperty('--dx', (c - ac) * 100 + '%'); d.style.setProperty('--dy', (r - ar) * 100 + '%');
     bd.fx.appendChild(d); setTimeout(() => d.remove(), 1200);
@@ -938,6 +1099,36 @@
     const d = el('div', 'fx-storm', '<i></i><i></i><i></i><i></i><i></i><div class="vortex">🌪️</div>');
     bd.fx.appendChild(d); setTimeout(() => d.remove(), 3500);
     bd.board.classList.add('stormy'); setTimeout(() => bd.board.classList.remove('stormy'), 3200);
+  }
+  function fxIcon(bd, cls, html, ms = 3300, pos) {
+    const d = el('div', 'fx-ev ' + cls, html);
+    if (pos) Object.assign(d.style, pos);
+    bd.fx.appendChild(d); setTimeout(() => d.remove(), ms);
+    return d;
+  }
+  function whaleFx(bd, r0, c0) {
+    fxIcon(bd, 'fx-whale', '<div class="whale">🐋</div><div class="spout"></div>', 3400, { left: c0 * 10 + '%', top: r0 * 10 + '%', width: '30%', height: '30%' });
+  }
+  function parrotFx(bd, [r, c]) {
+    fxIcon(bd, 'fx-parrot', '<div class="bird">🦜</div><div class="squawk">KRÄÄH!</div>', 3200, { left: c * 10 + '%', top: r * 10 + '%', width: '10%', height: '10%' });
+  }
+  function rumFx(bd) {
+    fxIcon(bd, 'fx-rum', '<span>🍺</span><span>🍻</span><span>🍺</span><div class="hic">hicks!</div>', 3200);
+    bd.board.classList.add('tipsy'); setTimeout(() => bd.board.classList.remove('tipsy'), 3000);
+  }
+  function repairFx(bd, r, c) {
+    fxIcon(bd, 'fx-repair', '<div class="tool">🔧</div><i></i><i></i><i></i><i></i>', 2600, { left: c * 10 + '%', top: r * 10 + '%', width: '10%', height: '10%' });
+  }
+  function sirenFx(bd) { fxIcon(bd, 'fx-siren', '<div class="mermaid">🧜‍♀️</div><span>🎵</span><span>🎶</span><span>🎵</span>', 3300); }
+  function bottleFx(bd) { fxIcon(bd, 'fx-bottle', '<div class="btl">🍾</div><div class="scroll">📜</div>', 3100); }
+  function fishFx(bd) { fxIcon(bd, 'fx-fish', '<span>🐟</span><span>🐠</span><span>🐟</span><span>🐡</span><span>🐟</span><span>🐠</span><span>🐟</span>', 3100); }
+  function mutinyFx(bd) {
+    fxIcon(bd, 'fx-mutiny', '<div class="swords">⚔️</div><div class="flag">🏴</div>', 3300);
+    bd.board.classList.add('tipsy'); setTimeout(() => bd.board.classList.remove('tipsy'), 1500);
+  }
+  function waveFx(bd, row, idx) {
+    const pos = row ? { left: '0', top: idx * 10 + '%', width: '100%', height: '10%' } : { left: idx * 10 + '%', top: '0', width: '10%', height: '100%' };
+    fxIcon(bd, 'fx-wave ' + (row ? 'row' : 'col'), '<div class="crest"></div><div class="wv">🌊</div>', 3200, pos);
   }
   function diarrheaFx(bd) {
     const d = el('div', 'fx-diarrhea', '<div class="dia-icon">🚽</div><div class="dia-wave"></div>');
@@ -1087,9 +1278,12 @@
       logAdd(turn === S.mySeat ? 'Das Los hat entschieden: Du beginnst!' : `Das Los hat entschieden: ${seatName(turn)} beginnt.`);
       if (turn === S.mySeat) Sound.ping();
     });
-    socket.on('turn', ({ turn, again }) => enqueue(() => {
+    socket.on('turn', ({ turn, again, extra, fog }) => enqueue(() => {
       if (!G) return 0;
       G.busy = false; G.turn = turn; G.again = again;
+      if (fog) { G.fog = fog; applyFog(); }
+      if (extra && turn === S.mySeat) { G.extra = Math.max(0, (G.extra || 0) - 1); G.again = false; toast('🍾 Extraschuss aus der Flaschenpost – du bist nochmal dran!'); }
+      if (G.skip && turn !== S.mySeat) { /* bleibt bis 'skipped' */ }
       setTurnUI();
       if (turn === S.mySeat && !again) Sound.ping();
       return 0;
@@ -1099,6 +1293,26 @@
     socket.on('event', m => enqueue(() => G ? onEvent(m) : 0));
     socket.on('eliminated', m => enqueue(() => G ? onEliminated(m) : 0));
     socket.on('gameover', m => enqueue(() => G ? onGameover(m) : 0));
+    socket.on('skipped', ({ seat }) => enqueue(() => {
+      if (!G) return 0;
+      if (seat === S.mySeat) G.skip = 0; else if (G.opp[seat]) G.opp[seat].skip = 0;
+      const msg = seat === S.mySeat ? '🍺 Du setzt diesen Zug aus – Kater nach der Rum-Party!' : `🍺 ${seatName(seat)} setzt aus – Kater nach der Rum-Party!`;
+      logAdd(msg, 'l-event'); toast(msg, 2500); Sound.tone(300, 150, .4, .15, 'triangle');
+      const bd = boardOf(seat); if (bd) rumFx(bd);
+      renderSides();
+      return 1400;
+    }));
+    socket.on('fishReveal', ({ target, r, c, res, ship }) => enqueue(() => {
+      if (!G || !G.opp[target]) return 0;
+      const O = G.opp[target];
+      O.shots.set(K(r, c), res); G.stats.hits++; G.fish = 0;
+      setPeg(O.bd, r, c, 'hit', true); Sound.boom();
+      logAdd(`🐟 Die Fische sind weg: ${coord(r, c)} war doch ein Treffer!`, 'l-hit');
+      toast(`🐟 Die Fische sind weg – ${coord(r, c)} war doch ein Treffer!`, 3500);
+      if (res === 'sunk' && ship && !O.known.some(x => x.id === ship.id)) { O.known.push(ship); O.bd.ships.appendChild(shipEl(ship.cc, ship.key, ship.r, ship.c, ship.h, 'sunk sunk-enemy', ship.id)); megaBoom(O.bd, ship); }
+      renderSides(); setTurnUI();
+      return res === 'sunk' ? 2400 : 800;
+    }));
     socket.on('empEnd', ({ target, reveal, sunk }) => enqueue(() => {
       if (!G) return 0;
       const O = G.opp[target];
@@ -1147,8 +1361,9 @@
     const oldLog = G ? G.log : [];
     newGame(st.myShips || []);
     G.log = oldLog; G.turn = st.turn;
-    G.powers = (st.myPowers || []).map(p => ({ type: p.type, uses: p.uses, max: p.type === 'artillery' ? 2 : 1 }));
+    G.powers = (st.myPowers || []).map(p => ({ type: p.type, uses: p.uses, max: Math.max(p.uses, p.type === 'artillery' ? 2 : 1) }));
     G.blind = st.blind || 0; G.drunk = st.drunk || 0;
+    G.siren = st.siren || 0; G.fish = st.fish || 0; G.extra = st.extra || 0; G.skip = st.skip || 0; G.fog = st.fog || {};
     for (const [r, c, v] of st.incoming) G.incoming.set(K(r, c), v);
     for (const s of G.order) {
       const O = G.opp[s];
@@ -1159,7 +1374,7 @@
     G.out = !!st.seats[st.mySeat].out;
     Q = Promise.resolve();
     closeModal();
-    renderBattle();
+    renderBattle(); applyFog();
     if (st.phase === 'over') {
       G.over = true;
       const won = st.winner === S.mySeat;
