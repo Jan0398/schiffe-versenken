@@ -420,3 +420,7 @@ input:focus { border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(63, 208, 255
 .invite-info small { color: var(--muted); }
 .invite-info .err { color: var(--red); }
 .invite-info b { letter-spacing: normal; }
+.modal-box.wide { max-width: 760px; max-height: 92vh; overflow-y: auto; }
+.modal-countries { text-align: left; }
+.small-hint { font-size: 14px; }
+.place-head h2 + .btn { margin-right: auto; }

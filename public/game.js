@@ -86,17 +86,20 @@
   function shake(node) { node.classList.remove('shake'); void node.offsetWidth; node.classList.add('shake'); }
 
   /* ================= Menü ================= */
-  function renderCountries() {
-    const box = $('countries'); box.innerHTML = '';
+  function countryGrid(box, onPick) {
+    box.innerHTML = '';
     for (const [title, fic] of [['Echte Marinen', false], ['Fiktive Flotten · Weltraum', true]]) {
       box.appendChild(el('div', 'c-group', title));
       for (const [cc, C] of Object.entries(COUNTRIES)) {
         if (!!C.fictional !== fic) continue;
         const d = el('div', 'country' + (cc === S.country ? ' on' : '') + (fic ? ' fic' : ''), `${flagSVG(cc)}<b>${C.name}</b><small>${C.navy}</small>`);
-        d.onclick = () => { S.country = cc; store.set('sv_country', cc); Sound.click(); renderCountries(); renderFleetPreview(); };
+        d.onclick = () => onPick(cc);
         box.appendChild(d);
       }
     }
+  }
+  function renderCountries() {
+    countryGrid($('countries'), cc => { S.country = cc; store.set('sv_country', cc); Sound.click(); renderCountries(); renderFleetPreview(); });
   }
   function renderFleetPreview() {
     const box = $('fleetPreview'); box.innerHTML = '';
@@ -211,17 +214,39 @@
   function initPlacement() {
     closeModal();
     P.placed = {}; P.sel = 'carrier'; P.h = true; P.hover = null; P.locked = false; P.power = null; S.oppReady = S.mode === 'cpu';
+    buildPlaceBoard();
+    $('waitMsg').classList.add('hidden');
+    show('scrPlace');
+    renderPlace();
+  }
+  function renderPlaceVs() {
+    $('placeVs').innerHTML = `<span class="mode-badge">${S.powerups ? '⚡ Power-ups' : '⚓ Klassisch'}</span> ${flagSVG(S.country)} <span>${esc(S.name)}</span> <b style="color:var(--red)">VS</b> ${flagSVG(S.opp.country)} <span>${esc(S.opp.name)}</span>`;
+  }
+  function buildPlaceBoard() {
     P.board = makeBoard($('placeBoard'), false, !!COUNTRIES[S.country].space);
     const L = P.board.cellsL;
     L.addEventListener('mousemove', e => { const a = P.board.at(e); if (a && (!P.hover || a[0] !== P.hover[0] || a[1] !== P.hover[1])) { P.hover = a; renderPlace(); } });
     L.addEventListener('mouseleave', () => { P.hover = null; renderPlace(); });
     L.addEventListener('click', e => { const a = P.board.at(e); if (a) placeAt(a[0], a[1]); });
     L.addEventListener('contextmenu', e => { e.preventDefault(); rotate(); });
-    $('placeVs').innerHTML = `<span class="mode-badge">${S.powerups ? '⚡ Power-ups' : '⚓ Klassisch'}</span> ${flagSVG(S.country)} <span>${esc(S.name)}</span> <b style="color:var(--red)">VS</b> ${flagSVG(S.opp.country)} <span>${esc(S.opp.name)}</span>`;
-    $('waitMsg').classList.add('hidden');
-    show('scrPlace');
-    renderPlace();
+    renderPlaceVs();
+    $('btnFaction').disabled = P.locked;
   }
+  function openFactionPicker() {
+    if (P.locked) { toast('Nach „Bereit“ kann die Fraktion nicht mehr gewechselt werden.'); return; }
+    modal(`<h2 style="font-size:28px">Fraktion wählen</h2><p>Deine Aufstellung bleibt erhalten.</p><div class="countries modal-countries" id="mCountries"></div><button class="btn ghost" id="mClose">Schließen</button>`);
+    $('modalBox').classList.add('wide');
+    countryGrid($('mCountries'), cc => {
+      closeModal(); $('modalBox').classList.remove('wide');
+      if (cc === S.country) return;
+      S.country = cc; store.set('sv_country', cc); Sound.click();
+      if (S.mode === 'online' && socket) socket.emit('setCountry', { country: cc });
+      buildPlaceBoard(); renderPlace(); renderCountries(); renderFleetPreview();
+      toast(`Du kommandierst jetzt: ${COUNTRIES[cc].name}`);
+    });
+    $('mClose').onclick = () => { closeModal(); $('modalBox').classList.remove('wide'); };
+  }
+  $('btnFaction').onclick = openFactionPicker;
   function renderPlace() {
     if (!P.board) return;
     const L = P.board.ships; L.innerHTML = '';
@@ -236,7 +261,7 @@
     renderDock();
     renderPowerPick();
     $('btnReady').disabled = Object.keys(P.placed).length < FLEET.length || P.locked || (S.powerups && !P.power);
-    ['btnRotate', 'btnRandom', 'btnClear'].forEach(b => $(b).disabled = P.locked);
+    ['btnRotate', 'btnRandom', 'btnClear', 'btnFaction'].forEach(b => $(b).disabled = P.locked);
   }
   function renderPowerPick() {
     const box = $('powerPick');
@@ -769,6 +794,7 @@
     modal(`<h2 class="${won ? 'win' : 'lose'}">${won ? 'SIEG!' : 'VERLOREN'}</h2>
       <p>${won ? `Glückwunsch, Kapitän ${esc(S.name)}! Du hast ${esc(S.opp.name)} besiegt.` : `${esc(S.opp.name)} hat deine Flotte versenkt.`}</p>
       <div class="stats"><div><b>${B.stats.shots}</b><small>Schüsse</small></div><div><b>${B.stats.hits}</b><small>Treffer</small></div><div><b>${acc}%</b><small>Quote</small></div></div>
+      <p class="small-hint">Bei der Revanche kannst du vor dem Aufstellen deine Fraktion neu wählen.</p>
       <div class="modal-btns"><button class="btn primary" id="mRematch">Revanche</button><button class="btn" id="mMenu">Hauptmenü</button></div>
       <button class="btn ghost small" id="mView">Spielfeld ansehen</button>`);
     $('mRematch').onclick = () => {
@@ -942,6 +968,12 @@
       S.opp = opp; S.bonus = true; S.powerups = !!powerups; S.oppOnline = true; S.oppReady = false; S.mode = 'online';
       B = null; initPlacement(); Sound.ping();
       toast(`${opp.name} ist an Bord! Stellt eure Flotten auf.`);
+    });
+    socket.on('oppCountry', ({ country }) => {
+      if (!S.opp || !COUNTRIES[country]) return;
+      S.opp.country = country;
+      if (S.screen === 'scrPlace') renderPlaceVs();
+      toast(`${S.opp.name} kommandiert jetzt: ${COUNTRIES[country].name}`);
     });
     socket.on('oppReady', () => {
       S.oppReady = true;

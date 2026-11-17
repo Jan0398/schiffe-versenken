@@ -272,6 +272,13 @@ io.on('connection', socket => {
     afterShots(room, idx, me, op, over);
   });
 
+  socket.on('setCountry', data => {
+    const { room, me, op } = ctx(socket);
+    if (!room || room.phase !== 'placing' || me.ships) return;
+    me.country = cleanCountry(data && data.country);
+    emitTo(op, 'oppCountry', { country: me.country });
+  });
+
   socket.on('rematch', () => {
     const { room, me, op } = ctx(socket);
     if (!room || room.phase !== 'over' || !op) return;
