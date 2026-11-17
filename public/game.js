@@ -120,9 +120,10 @@
   $('brandHome').onclick = () => { if (S.screen === 'scrMenu') return; confirmLeave(); };
 
   const MODE_HINT = { classic: 'Klassische Regeln: Wer trifft, darf nochmal schießen.', power: 'Wie klassisch – plus ein Power-up pro Spieler: EMP, Artilleriebeschuss, Nuke oder Radar. Einmal einsetzbar, ersetzt deinen Schuss.' };
+  const MODE_NOTE = ' Gilt für Spiele gegen den Computer und für Räume, die du erstellst – beim Beitreten legt der Gastgeber den Modus fest.';
   function renderMode() {
     $$('#segMode button').forEach(x => x.classList.toggle('on', x.dataset.v === S.pmode));
-    $('modeHint').textContent = MODE_HINT[S.pmode];
+    $('modeHint').textContent = MODE_HINT[S.pmode] + MODE_NOTE;
   }
   $$('#segMode button').forEach(b => b.onclick = () => { S.pmode = b.dataset.v; store.set('sv_pmode', S.pmode); Sound.click(); renderMode(); });
   renderMode();
@@ -872,9 +873,19 @@
     $('onlineHint').textContent = 'Online-Modus nur verfügbar, wenn das Spiel über den Server läuft.';
     ['btnHost', 'btnJoin'].forEach(b => $(b).disabled = true);
   }
-  if (inviteCode && socket) {
-    $('joinInvite').classList.remove('hidden'); $('inviteCode').textContent = inviteCode; $('inCode').value = inviteCode;
+  function setInviteMode(on) {
+    $('joinInvite').classList.toggle('hidden', !on);
+    $('modeField').classList.toggle('hidden', on);
+    document.querySelector('.modes').classList.toggle('hidden', on);
   }
+  if (inviteCode && socket) {
+    setInviteMode(true); $('inviteCode').textContent = inviteCode; $('inCode').value = inviteCode;
+    socket.emit('peek', { code: inviteCode }, res => {
+      if (!res.ok) { $('inviteInfo').innerHTML = `<span class="err">${esc(res.error)}</span>`; $('btnAcceptInvite').disabled = true; return; }
+      $('inviteInfo').innerHTML = `${flagSVG(res.hostCountry)} <b>${esc(res.host)}</b> fordert dich heraus<br>Spielmodus: <b>${res.powerups ? '⚡ Mit Power-ups' : '⚓ Klassisch'}</b> <small>(vom Gastgeber festgelegt)</small>`;
+    });
+  }
+  $('btnIgnoreInvite').onclick = () => { setInviteMode(false); $('inCode').value = ''; history.replaceState(null, '', location.pathname); };
 
   function joinRoom(code) {
     if (!getName() || !socket) return;
@@ -885,7 +896,7 @@
       S.mode = 'online'; S.code = res.code; S.pid = res.pid; S.bonus = true; S.powerups = !!res.powerups;
       sess.set({ code: S.code, pid: S.pid });
       history.replaceState(null, '', location.pathname);
-      $('joinInvite').classList.add('hidden');
+      setInviteMode(false);
     });
   }
   $('btnAcceptInvite').onclick = () => joinRoom(inviteCode);

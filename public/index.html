@@ -41,7 +41,7 @@
 
     <div class="fleet-preview" id="fleetPreview"></div>
 
-    <div class="field">
+    <div class="field" id="modeField">
       <span>Spielmodus</span>
       <div class="seg big-seg" id="segMode">
         <button data-v="classic">⚓ Klassisch</button>
@@ -52,7 +52,9 @@
 
     <div id="joinInvite" class="invite hidden">
       <div>Du wurdest eingeladen! Raum <b id="inviteCode"></b></div>
+      <div class="invite-info" id="inviteInfo">Raum wird geladen …</div>
       <button class="btn primary big" id="btnAcceptInvite">⚓ Beitreten</button>
+      <button class="btn ghost small" id="btnIgnoreInvite">Einladung ignorieren und selbst spielen</button>
     </div>
 
     <div class="modes">

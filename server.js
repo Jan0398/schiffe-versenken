@@ -146,6 +146,14 @@ io.on('connection', socket => {
     startPlacing(room);
   });
 
+  socket.on('peek', (data, cb) => {
+    if (typeof cb !== 'function') return;
+    const room = rooms.get(String((data && data.code) || '').toUpperCase().trim());
+    if (!room) return cb({ ok: false, error: 'Raum nicht gefunden – der Link ist abgelaufen oder falsch.' });
+    if (room.players.length >= 2 || room.phase !== 'lobby') return cb({ ok: false, error: 'Dieser Raum ist schon voll.' });
+    cb({ ok: true, powerups: room.powerups, host: room.players[0].name, hostCountry: room.players[0].country });
+  });
+
   socket.on('rejoin', (data, cb) => {
     if (typeof cb !== 'function') return;
     const room = data && rooms.get(String(data.code || ''));
